@@ -63,7 +63,7 @@ export class ChapterRenderer {
     const raw = await fetch(spineItem.blobUrl).then(r => r.text());
 
     // Parse as HTML (handles both HTML5 and XHTML spine items)
-    const doc = new DOMParser().parseFromString(raw, 'text/html');
+    const doc = new DOMParser().parseFromString(this._xhtmlToHtml(raw), 'text/html');
 
     // Remove any <base> tags — we resolve URLs ourselves
     doc.querySelectorAll('base').forEach(el => el.remove());
@@ -187,6 +187,26 @@ export class ChapterRenderer {
         fr.readAsDataURL(blob);
       });
     } catch { return null; }
+  }
+
+  // XHTML allows self-closing non-void elements (e.g. `<a id="x"/>` as an empty anchor
+  // target). HTML5 parsing ignores the trailing "/" on anything but a void element, so
+  // the tag never closes and silently swallows every sibling that follows as its
+  // descendants — an `<a>` used this way (common for footnote/pagebreak anchors) ends up
+  // wrapping the rest of the chapter, and any `a *` styling then paints the whole chapter
+  // with link coloring. Rewrite such tags to explicit open/close pairs before HTML parsing.
+  static _VOID_ELEMENTS = new Set([
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'link', 'meta', 'param', 'source', 'track', 'wbr',
+  ]);
+
+  _xhtmlToHtml(raw) {
+    return raw.replace(/<([a-zA-Z][a-zA-Z0-9:-]*)((?:"[^"]*"|'[^']*'|[^"'/>])*)\/>/g,
+      (match, tag, attrs) => {
+        return ChapterRenderer._VOID_ELEMENTS.has(tag.toLowerCase())
+          ? match
+          : `<${tag}${attrs}></${tag}>`;
+      });
   }
 
   _rewriteCssUrls(cssText, cssAbsPath) {

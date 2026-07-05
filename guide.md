@@ -34,7 +34,7 @@ This guide covers every feature available inside the Codexa EPUB reader. Open an
 
 ## Interface Overview
 
-![Reader interface overview](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/overview.png)
+![Reader interface overview](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/overview.png)
 
 The reader has three main areas:
 
@@ -46,7 +46,7 @@ The reader has three main areas:
 
 ## Navigation
 
-![Navigation tap zones](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/navigation.png)
+![Navigation tap zones](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/navigation.png)
 
 ### Tap / Click
 
@@ -84,7 +84,7 @@ When using the Codexa Android app, the hardware volume keys navigate pages. The 
 
 ## Table of Contents
 
-![Table of contents sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/toc.png)
+![Table of contents sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/toc.png)
 
 Tap the **TOC button** (☰) in the header, or press `K`, to open the table of contents sidebar.
 
@@ -96,7 +96,7 @@ Tap the **TOC button** (☰) in the header, or press `K`, to open the table of c
 
 ## Bookmarks
 
-![Bookmarks sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/bookmarks.png)
+![Bookmarks sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/bookmarks.png)
 
 Tap the **Bookmarks button** (🔖) in the header to open the bookmarks sidebar. The button badge shows the number of saved bookmarks.
 
@@ -118,7 +118,7 @@ Bookmarks are stored per user and are available on all devices.
 
 ## Highlights & Annotations
 
-![Annotation toolbar](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/annotation-toolbar.png)
+![Annotation toolbar](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/annotation-toolbar.png)
 
 ### Creating a Highlight
 
@@ -134,7 +134,7 @@ After the toolbar appears, tap the **pencil (✎)** button instead of a colour. 
 
 ### Viewing All Annotations
 
-![Annotations sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/annotations-sidebar.png)
+![Annotations sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/annotations-sidebar.png)
 
 Tap the **Highlights button** in the header to open the annotations sidebar. All highlights are listed in reading order with a colour indicator, the highlighted text, and any attached note.
 
@@ -157,7 +157,7 @@ After selecting text, tap the **magnifying glass (🔍)** button in the annotati
 
 ## Search
 
-![Search sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/search.png)
+![Search sidebar](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/search.png)
 
 Tap the **Search button** (🔍) in the header, or press `I`, to open the search sidebar.
 
@@ -182,7 +182,7 @@ Close the sidebar with the **×** button or press `Esc`. Your reading position i
 
 ## Dictionary Lookup
 
-![Dictionary popup](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/dictionary.png)
+![Dictionary popup](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/dictionary.png)
 
 ### Looking Up a Word
 
@@ -201,7 +201,7 @@ Admins can install new dictionaries from the Settings page by uploading a ZIP ar
 
 ## Footnotes
 
-![Footnote popup](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/footnote.png)
+![Footnote popup](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/footnote.png)
 
 Tap any footnote or endnote marker in the text. A popup slides up from the bottom displaying the note content inline — you don't need to leave your reading position. Tap **×** or anywhere outside the popup to dismiss it.
 
@@ -225,7 +225,7 @@ If you close the browser or app unexpectedly mid-chapter, Codexa shows a **resum
 
 ## Jump to Position
 
-![Jump to position panel](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/jump-pct.png)
+![Jump to position panel](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/jump-pct.png)
 
 Tap the **percentage button** (%) in the header to open the jump panel.
 
@@ -246,7 +246,7 @@ Press `F` again or `Esc` to exit fullscreen. A small exit button also appears in
 
 ## Reading Settings
 
-![Settings panel](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings.png)
+![Settings panel](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings.png)
 
 Tap the **Settings button** (⚙) in the header, or press `S`, to open the settings panel. Settings are organised into six tabs.
 
@@ -256,7 +256,7 @@ Settings apply globally. If you change a setting for a specific book and later w
 
 ### Theme Tab
 
-![Theme settings](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings-theme.png)
+![Theme settings](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings-theme.png)
 
 **Theme** — choose one of six built-in colour schemes:
 
@@ -279,7 +279,7 @@ Settings apply globally. If you change a setting for a specific book and later w
 
 ### Text Tab
 
-![Text settings](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings-text.png)
+![Text settings](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings-text.png)
 
 **Font** — select from system fonts and any custom fonts uploaded by an admin. Each book can use a different font.
 
@@ -307,7 +307,7 @@ Settings apply globally. If you change a setting for a specific book and later w
 
 ### Page Tab
 
-![Page/layout settings](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings-page.png)
+![Page/layout settings](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings-page.png)
 
 **Page layout** — toggle between **Single page** and **Two pages** (spread). Two-page mode shows left and right pages side by side, like an open book.
 
@@ -321,7 +321,7 @@ Settings apply globally. If you change a setting for a specific book and later w
 
 ### Device Tab
 
-![Device settings](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings-device.png)
+![Device settings](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings-device.png)
 
 **Keep screen on** — prevents the display from sleeping while reading. Uses the browser WakeLock API (requires a secure context / HTTPS).
 
@@ -341,7 +341,7 @@ Settings apply globally. If you change a setting for a specific book and later w
 
 ### Status Bar Tab
 
-![Status bar settings](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings-statusbar.png)
+![Status bar settings](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings-statusbar.png)
 
 The status bar system lets you place up to six information items anywhere around the reading area.
 
@@ -385,7 +385,7 @@ Optional horizontal lines above or below the status bar area. Toggle on/off and 
 
 ### Dictionaries Tab
 
-![Dictionary settings](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/settings-dicts.png)
+![Dictionary settings](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/settings-dicts.png)
 
 Lists all dictionaries installed on the server. Each row shows the dictionary name and word count.
 
@@ -398,7 +398,7 @@ Admins see an additional **Upload dictionary ZIP** button. The ZIP must contain 
 
 ## Status Bar Overlays
 
-![Status bar overlays](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/statusbar.png)
+![Status bar overlays](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/statusbar.png)
 
 The six overlay positions sit outside the text area and never overlap the reading content:
 
@@ -437,7 +437,7 @@ Shortcuts are disabled when focus is inside a text input (e.g. the search field 
 
 ## Offline Reading
 
-![Offline download](https://raw.githubusercontent.com/thehijacker/codexa/main/screenshots/reader/offline.png)
+![Offline download](https://raw.githubusercontent.com/thehijacker/codexa/main/docs/screenshots/reader/offline.png)
 
 ### Downloading a Book
 

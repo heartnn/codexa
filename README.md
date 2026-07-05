@@ -23,17 +23,17 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 
 | Library | OPDS Browser | Book Info |
 |:---:|:---:|:---:|
-| ![Library](screenshots/library.png) | ![OPDS Browser](screenshots/opds_browser.png) | ![Book Info](screenshots/book_info.png) |
+| ![Library](docs/screenshots/library.png) | ![OPDS Browser](docs/screenshots/opds_browser.png) | ![Book Info](docs/screenshots/book_info.png) |
 | **Reader** | **Dictionary** | **Search** |
-| ![Reader](screenshots/reader.png) | ![Dictionary](screenshots/dictionary.png) | ![Search](screenshots/search.png) |
+| ![Reader](docs/screenshots/reader.png) | ![Dictionary](docs/screenshots/dictionary.png) | ![Search](docs/screenshots/search.png) |
 | **TOC** | **Settings** | **E-Ink** |
-| ![TOC](screenshots/toc.png) | ![Settings](screenshots/settings.png) | ![E-Ink](screenshots/e-ink.png) |
+| ![TOC](docs/screenshots/toc.png) | ![Settings](docs/screenshots/settings.png) | ![E-Ink](docs/screenshots/e-ink.png) |
 
 ### Mobile
 
 | Library | Reader | Dictionary | E-Ink |
 |:---:|:---:|:---:|:---:|
-| ![Mobile Library](screenshots/mobile/library.png) | ![Mobile Reader](screenshots/mobile/reader.png) | ![Mobile Dictionary](screenshots/mobile/dictionary.png) | ![Mobile E-Ink](screenshots/mobile/eink.png) |
+| ![Mobile Library](docs/screenshots/mobile/library.png) | ![Mobile Reader](docs/screenshots/mobile/reader.png) | ![Mobile Dictionary](docs/screenshots/mobile/dictionary.png) | ![Mobile E-Ink](docs/screenshots/mobile/eink.png) |
 
 ---
 

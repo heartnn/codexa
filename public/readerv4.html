@@ -1197,8 +1197,11 @@
     } catch {}
   </script>
 
-  <!-- JSZip: used by CXReader to parse EPUB / CBZ archives -->
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <!-- JSZip: used by CXReader to parse EPUB / CBZ archives.
+       Vendored same-origin (not loaded from CDN) so the service worker can precache it —
+       cross-origin requests are deliberately left uncached by sw.js, and third-party CDN
+       resources aren't reliably available offline in iOS home-screen PWAs. -->
+  <script src="/js/vendor/jszip.min.js"></script>
   <script type="module" src="/js/reader_v4.js?v=br-v101"></script>
   <script src="/js/sw-register.js"></script>
 </body>

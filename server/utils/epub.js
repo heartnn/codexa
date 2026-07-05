@@ -131,7 +131,7 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
       const identList = Array.isArray(identRaw) ? identRaw : [identRaw];
       for (const id of identList) {
         const scheme = String(id?.['@_opf:scheme'] || id?.['@_scheme'] || '').toUpperCase();
-        const text   = typeof id === 'string' ? id.trim() : String(id?.['#text'] || '').trim();
+        const text   = decodeEntities(typeof id === 'string' ? id.trim() : String(id?.['#text'] || '').trim());
         const clean  = text.replace(/^urn:isbn:/i, '').replace(/[-\s]/g, '');
         if (scheme === 'ISBN' || /^(978|979)\d{10}$/.test(clean) || /^\d{10}$/.test(clean)) {
           result.isbn = text.replace(/^urn:isbn:/i, '');
@@ -154,8 +154,8 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
 
     // Calibre series tags + page count from named/property metas
     for (const m of metas) {
-      if (m['@_name'] === 'calibre:series')        result.series_name   = String(m['@_content'] || '').trim();
-      if (m['@_name'] === 'calibre:series_index')  result.series_number = String(m['@_content'] || '').trim();
+      if (m['@_name'] === 'calibre:series')        result.series_name   = decodeEntities(String(m['@_content'] || '').trim());
+      if (m['@_name'] === 'calibre:series_index')  result.series_number = decodeEntities(String(m['@_content'] || '').trim());
       if (!result.pages && ['calibre:num_pages', 'schema:numberOfPages'].includes(m['@_name'])) {
         const v = String(m['@_content'] || '').trim();
         if (v && v !== '0') result.pages = v;
@@ -172,17 +172,17 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
       for (const col of collections) {
         const colId    = col['@_id'];
         const position = metas.find(m => m['@_property'] === 'group-position' && m['@_refines'] === `#${colId}`);
-        result.series_name   = String(col['#text'] || '').trim();
-        result.series_number = position ? String(position['#text'] || '').trim() : '';
+        result.series_name   = decodeEntities(String(col['#text'] || '').trim());
+        result.series_number = position ? decodeEntities(String(position['#text'] || '').trim()) : '';
         if (result.series_name) break;
       }
       // Fallback: no refines — just grab first of each
       if (!result.series_name) {
         const col = metas.find(m => m['@_property'] === 'belongs-to-collection');
         if (col) {
-          result.series_name = String(col['#text'] || '').trim();
+          result.series_name = decodeEntities(String(col['#text'] || '').trim());
           const pos = metas.find(m => m['@_property'] === 'group-position');
-          if (pos) result.series_number = String(pos['#text'] || '').trim();
+          if (pos) result.series_number = decodeEntities(String(pos['#text'] || '').trim());
         }
       }
     }
@@ -274,7 +274,7 @@ function extractCbzMetadata(cbzPath, coversDir, fileHash) {
       try {
         const parsed = xmlParser.parse(ci.getData().toString('utf8'));
         const info   = parsed?.ComicInfo || parsed?.comicinfo || {};
-        const txt    = (v) => (v !== undefined && v !== null) ? String(v).trim() : '';
+        const txt    = (v) => (v !== undefined && v !== null) ? decodeEntities(String(v).trim()) : '';
         if (txt(info.Title))   result.title       = txt(info.Title);
         if (txt(info.Series))  result.series_name = txt(info.Series);
         if (txt(info.Number))  result.series_number = txt(info.Number);

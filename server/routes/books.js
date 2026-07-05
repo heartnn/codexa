@@ -303,7 +303,9 @@ router.patch('/:id/file', async (req, res) => {
       language    = CASE WHEN ? != '' THEN ? ELSE language    END,
       isbn        = CASE WHEN ? != '' THEN ? ELSE isbn        END,
       genres      = CASE WHEN ? != '' THEN ? ELSE genres      END,
-      pages       = CASE WHEN ? > 0   THEN ? ELSE pages       END
+      pages       = CASE WHEN ? > 0   THEN ? ELSE pages       END,
+      series_name   = CASE WHEN ? != '' THEN ? ELSE series_name   END,
+      series_number = CASE WHEN ? != '' THEN ? ELSE series_number END
     WHERE id = ?`).run(
       newMd5,
       meta.cover_path,
@@ -313,6 +315,8 @@ router.patch('/:id/file', async (req, res) => {
       meta.isbn        || '', meta.isbn        || '',
       meta.genres      || '', meta.genres      || '',
       meta.pages       || 0,  meta.pages       || 0,
+      meta.series_name   || '', meta.series_name   || '',
+      meta.series_number || '', meta.series_number || '',
       book.id
     );
     res.json({ file_hash_md5: newMd5, cover_path: meta.cover_path });
@@ -339,8 +343,8 @@ router.post('/reextract-all', (req, res) => {
         try { fs.unlinkSync(path.join(COVERS_DIR, book.cover_path)); } catch { /* already gone */ }
       }
       const meta = extractEpubMetadata(epubPath, COVERS_DIR, book.file_hash);
-      db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ? WHERE id = ?')
-        .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', book.id);
+      db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ?, series_name = ?, series_number = ? WHERE id = ?')
+        .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', meta.series_name || book.series_name || '', meta.series_number || book.series_number || '', book.id);
       updated++;
     } catch { failed++; }
   }
@@ -366,8 +370,8 @@ router.post('/:id/reextract-cover', (req, res) => {
   }
 
   const meta = extractEpubMetadata(epubPath, COVERS_DIR, book.file_hash);
-  db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ? WHERE id = ?')
-    .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', book.id);
+  db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ?, series_name = ?, series_number = ? WHERE id = ?')
+    .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', meta.series_name || book.series_name || '', meta.series_number || book.series_number || '', book.id);
   res.json({ cover_path: meta.cover_path, description: meta.description });
 });
 

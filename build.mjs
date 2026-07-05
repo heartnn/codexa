@@ -17,11 +17,21 @@ function copyDir(src, dest) {
   }
 }
 
+// Third-party vendored scripts (e.g. js/vendor/jszip.min.js) are plain global
+// scripts, not ESM modules. Running them through the esbuild ESM transpile
+// below wraps their CJS-style code in a require_*() shim and appends an
+// `export default ...` statement — a syntax error in a classic <script> tag
+// that silently kills the whole file, so the global it defines never exists.
+const NO_TRANSPILE_DIRS = ['vendor'];
+
 function collectJs(dir) {
   const files = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...collectJs(p));
+    if (entry.isDirectory()) {
+      if (NO_TRANSPILE_DIRS.includes(entry.name)) continue;
+      files.push(...collectJs(p));
+    }
     else if (entry.name.endsWith('.js')) files.push(p);
   }
   return files;

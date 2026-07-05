@@ -616,16 +616,12 @@ html, body {
   pointer-events: none;
 }
 
-body.page-gap-shadow-on #annot-toolbar,
-body.page-gap-shadow-on #annot-note-editor,
-body.page-gap-shadow-on #annot-edit-sheet,
-body.page-gap-shadow-on #footnote-popup,
+/* Left/right sidebars only — bottom sheets are full-width (no free left/right
+   edge) so the "book spine" toggle's always-on shadow is skipped for them. */
 body.page-gap-shadow-on #toc-sidebar,
 body.page-gap-shadow-on #search-sidebar,
 body.page-gap-shadow-on #bookmarks-sidebar,
-body.page-gap-shadow-on #settings-panel,
-body.page-gap-shadow-on .sleep-timer-panel,
-body.page-gap-shadow-on .dict-popup {
+body.page-gap-shadow-on #settings-panel {
   box-shadow: var(--shadow);
 }
 
