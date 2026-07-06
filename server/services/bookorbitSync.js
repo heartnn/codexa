@@ -10,8 +10,10 @@
 // Mapping: books came into Codexa via BookOrbit's OPDS, so the stored
 //          book_opds_sources.acq_href is `<base>/opds/<bookId>/download?fileId=<fileId>`.
 // Feature endpoints (base = <server>/api/v1):
-//   Annotations  GET/POST   /books/:bookId/annotations   PATCH/DELETE .../:id
-//   Sessions     POST       /books/:bookId/sessions
+//   Annotations  GET/POST   /books/:bookId/annotations       PATCH/DELETE .../:id
+//   Bookmarks    GET/POST   /books/:bookId/bookmarks         DELETE .../:id (no update route)
+//   Sessions     POST       /books/:bookId/sessions          (no boFileId -> BookOrbit infers file & can't take an explicit progressDelta)
+//                POST       /books/files/:fileId/sessions    (boFileId known -> explicit progressDelta + endProgress)
 //   Read status  PATCH      /books/:id/status
 //   Rating       POST       /books/bulk-set-rating
 //
@@ -338,12 +340,75 @@ async function syncAnnotations(userId, ctx, m, state) {
     .run(userId, m.bookId);
 }
 
+// ── bookmarks (full two-way reconcile per book, mirrors syncAnnotations) ──────
+// BookOrbit's bookmark API has no update route (GET/POST/DELETE only), so there is nothing
+// to PATCH — a bookmark is either created, deleted, or left alone.
+async function syncBookmarks(userId, ctx, m) {
+  const db = getDb();
+
+  const local = db.prepare('SELECT * FROM bookmarks WHERE user_id = ? AND book_id = ?').all(userId, m.bookId);
+  const remoteRes = await api(userId, ctx, 'GET', `/books/${m.boBookId}/bookmarks`);
+  if (!remoteRes.ok) return;
+  const remote = Array.isArray(remoteRes.data) ? remoteRes.data : (remoteRes.data?.items || []);
+  const remoteById = new Map(remote.map(r => [String(r.id), r]));
+  const localByBo = new Map();
+  for (const b of local) if (b.bo_id) localByBo.set(String(b.bo_id), b);
+
+  let pushed = 0, pulled = 0;
+  for (const b of local) {
+    if (b.deleted) {
+      if (b.bo_id) {
+        const res = await api(userId, ctx, 'DELETE', `/books/${m.boBookId}/bookmarks/${b.bo_id}`);
+        if (res.ok || res.status === 404) { db.prepare('DELETE FROM bookmarks WHERE id = ?').run(b.id); pushed++; }
+      } else {
+        db.prepare('DELETE FROM bookmarks WHERE id = ?').run(b.id); // never reached server
+      }
+      continue;
+    }
+    if (!b.bo_id) {
+      if (!b.cfi) continue; // BookOrbit requires cfi or positionSeconds; Codexa bookmarks are always CFI
+      const title = (b.label || '').trim() || `${Math.round((b.pct || 0) * 100)}%`;
+      const res = await api(userId, ctx, 'POST', `/books/${m.boBookId}/bookmarks`, { cfi: b.cfi, title });
+      if (res.ok && res.data?.id) {
+        db.prepare('UPDATE bookmarks SET bo_id = ? WHERE id = ?').run(String(res.data.id), b.id);
+        pushed++;
+      }
+    }
+  }
+
+  const insert = db.prepare(`
+    INSERT INTO bookmarks (user_id, book_id, cfi, pct, label, bo_id, deleted)
+    VALUES (?, ?, ?, 0, ?, ?, 0)
+  `);
+  for (const r of remote) {
+    if (!r.cfi) continue; // Codexa can only place CFI-anchored bookmarks
+    if (!localByBo.has(String(r.id))) {
+      insert.run(userId, m.bookId, r.cfi, r.title || '', String(r.id));
+      pulled++;
+    }
+  }
+  for (const [boId, b] of localByBo) {
+    if (!remoteById.has(boId) && !b.deleted) {
+      db.prepare('DELETE FROM bookmarks WHERE id = ?').run(b.id); // deleted on the server
+      pulled++;
+    }
+  }
+
+  if (pushed || pulled) console.log(`[bookorbit] book ${m.bookId}: bookmarks pushed ${pushed}, pulled/removed ${pulled}`);
+}
+
 // ── reading sessions (one-way up; only "real" sessions) ───────────────────────
+// When boFileId is known, sessions go to the fileId-scoped endpoint so we can send an
+// explicit progressDelta computed from our own start/end percentages. This matters because
+// BookOrbit's bookId-scoped "manual session" endpoint has no progressDelta field — it derives
+// one from the previous session it knows about, which is wrong (usually way overstated) the
+// first time a book's sessions start carrying endProgress, since BookOrbit has no earlier
+// baseline to diff against. Falls back to the bookId-scoped endpoint when boFileId is unknown.
 async function uploadSessions(userId, ctx, m, state) {
   const db = getDb();
   const wm = state.sessions_watermark || 0;
   const sessions = db.prepare(
-    'SELECT id, start_ts, end_ts, pages_nav FROM reading_sessions WHERE user_id = ? AND book_id = ? AND end_ts IS NOT NULL AND id > ? ORDER BY id'
+    'SELECT id, start_ts, end_ts, pages_nav, start_pct, end_pct FROM reading_sessions WHERE user_id = ? AND book_id = ? AND end_ts IS NOT NULL AND id > ? ORDER BY id'
   ).all(userId, m.bookId, wm);
 
   let maxId = wm;
@@ -351,11 +416,28 @@ async function uploadSessions(userId, ctx, m, state) {
     maxId = Math.max(maxId, s.id);
     const dur = (s.end_ts || 0) - (s.start_ts || 0);
     if (dur < 60 || (s.pages_nav || 0) < 2) continue; // skip non-real sessions
-    const durationMinutes = Math.max(1, Math.min(1440, Math.round(dur / 60)));
-    const res = await api(userId, ctx, 'POST', `/books/${m.boBookId}/sessions`, {
-      startedAt: new Date(s.start_ts * 1000).toISOString(),
-      durationMinutes,
-    });
+
+    const endProgress = s.end_pct != null ? Math.round(s.end_pct * 10000) / 100 : null;
+    let res;
+    if (m.boFileId) {
+      const progressDelta = (s.start_pct != null && s.end_pct != null)
+        ? Math.max(-100, Math.min(100, Math.round((s.end_pct - s.start_pct) * 10000) / 100))
+        : null;
+      const body = {
+        sessionId: `cxa:${m.boFileId}:${s.id}`,
+        startedAt: new Date(s.start_ts * 1000).toISOString(),
+        endedAt: new Date(s.end_ts * 1000).toISOString(),
+        durationSeconds: dur,
+      };
+      if (progressDelta != null) body.progressDelta = progressDelta;
+      if (endProgress != null) body.endProgress = endProgress;
+      res = await api(userId, ctx, 'POST', `/books/files/${m.boFileId}/sessions`, body);
+    } else {
+      const durationMinutes = Math.max(1, Math.min(1440, Math.round(dur / 60)));
+      const body = { startedAt: new Date(s.start_ts * 1000).toISOString(), durationMinutes };
+      if (endProgress != null) body.endProgress = endProgress;
+      res = await api(userId, ctx, 'POST', `/books/${m.boBookId}/sessions`, body);
+    }
     if (!res.ok) { maxId = s.id - 1; break; } // retry this one next run
   }
   if (maxId > wm) {
@@ -399,6 +481,72 @@ async function syncBookState(userId, ctx, m, state) {
   }
 }
 
+// ── recommendations / series lookups (on-demand, read-only, single book) ─────
+function mapRecBook(b) {
+  return {
+    boBookId: b.id,
+    title: b.title,
+    authors: b.authors || [],
+    hasCover: !!b.hasCover,
+    seriesIndex: b.seriesIndex ?? null,
+  };
+}
+
+const EMPTY_RELATED = { enabled: true, mapped: false, recommendations: [], seriesBooks: [], nextInSeries: null };
+
+async function getRecommendations(userId, bookId) {
+  const ctx = getContext(userId);
+  if (!ctx) return { ...EMPTY_RELATED, enabled: false };
+  const db = getDb();
+  const resolved = await resolveBooks(db, userId, ctx, { bookId });
+  const m = resolved[0];
+  if (!m) return EMPTY_RELATED;
+
+  try { if (!tokens.has(userId)) await login(userId, ctx); }
+  catch { return EMPTY_RELATED; }
+
+  const [recRes, seriesRes] = await Promise.all([
+    api(userId, ctx, 'GET', `/books/${m.boBookId}/recommendations`),
+    api(userId, ctx, 'GET', `/books/${m.boBookId}/series-books`),
+  ]);
+
+  const recommendations = (recRes.ok && Array.isArray(recRes.data) ? recRes.data : []).map(mapRecBook);
+
+  const seriesRaw = seriesRes.ok && Array.isArray(seriesRes.data) ? seriesRes.data : [];
+  const idx = seriesRaw.findIndex(b => b.id === m.boBookId);
+  const nextInSeries = idx >= 0 && idx + 1 < seriesRaw.length ? mapRecBook(seriesRaw[idx + 1]) : null;
+  const seriesBooks = seriesRaw.filter(b => b.id !== m.boBookId).map(mapRecBook);
+
+  return { enabled: true, mapped: true, recommendations, seriesBooks, nextInSeries };
+}
+
+// Fetch a BookOrbit-hosted image (thumbnail) through our own server so the browser never
+// needs BookOrbit's JWT directly. Shares the same token jar as api().
+async function fetchAsset(userId, ctx, path) {
+  if (!tokens.has(userId)) await login(userId, ctx);
+  const doFetch = () => {
+    const tok = tokens.get(userId);
+    return fetch(`${ctx.webBase}${path}`, {
+      headers: { authorization: `Bearer ${tok.access}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  };
+  let res;
+  try { res = await doFetch(); } catch { return { ok: false }; }
+  if (res.status === 401) {
+    await refresh(userId, ctx);
+    try { res = await doFetch(); } catch { return { ok: false }; }
+  }
+  if (!res.ok) return { ok: false, status: res.status };
+  return { ok: true, contentType: res.headers.get('content-type') || 'image/jpeg', buffer: Buffer.from(await res.arrayBuffer()) };
+}
+
+async function getCover(userId, boBookId) {
+  const ctx = getContext(userId);
+  if (!ctx) return { ok: false };
+  return fetchAsset(userId, ctx, `/books/${boBookId}/thumbnail`);
+}
+
 // ── orchestrator ──────────────────────────────────────────────────────────────
 const running = new Set();
 
@@ -428,6 +576,7 @@ async function runSync(userId, opts = {}) {
         try {
           const state = db.prepare('SELECT * FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(userId, m.bookId) || {};
           await syncAnnotations(userId, ctx, m, state);
+          await syncBookmarks(userId, ctx, m);
           await uploadSessions(userId, ctx, m, state);
           await syncBookState(userId, ctx, m, state);
         } catch (e) {
@@ -457,4 +606,6 @@ module.exports = {
   webBaseFromKosyncUrl,
   parseBoIds,
   VALID_STATUS,
+  getRecommendations,
+  getCover,
 };

@@ -35,6 +35,7 @@ let _activeCardMenu = null; // { popup, btn, onOutsideClick, onEsc }
 
 // ── Offline state ─────────────────────────────────────────────────────────────
 let isOfflineMode    = false;
+let bookorbitEnabled = false; // whether BookOrbit extended sync is on, for the info modal's "Related" tab
 let offlineBooks     = [];        // IDB snapshot used when server is unreachable
 let downloadedIds    = new Set(); // bookIds currently stored offline
 let downloadingIds   = new Set(); // bookIds with an active download in progress
@@ -759,6 +760,7 @@ export async function openInfoModal(book, startTab = '') {
         ${isOfflineMode ? '' : `<button class="imt-tab" data-tab="shelves" role="tab">${t('library.tab_shelves')}</button>`}
         ${isOfflineMode ? '' : `<button class="imt-tab" data-tab="kosync" role="tab">${t('library.tab_kosync')}</button>`}
         <button class="imt-tab" data-tab="reading" role="tab">${t('library.tab_reading')}</button>
+        ${(isOfflineMode || !bookorbitEnabled) ? '' : `<button class="imt-tab" data-tab="related" role="tab">${t('library.tab_related')}</button>`}
       </div>
 
       <div class="info-modal-tab-content">
@@ -851,6 +853,11 @@ export async function openInfoModal(book, startTab = '') {
           <div id="imt-reading-inner"><div class="imt-empty" style="padding:1rem 0">Loading…</div></div>
         </div>
 
+        ${(isOfflineMode || !bookorbitEnabled) ? '' : `
+        <div class="imt-panel" id="imt-related" style="display:none">
+          <div id="imt-related-inner"><div class="imt-empty" style="padding:1rem 0">Loading…</div></div>
+        </div>`}
+
       </div>
     </div>`;
 
@@ -897,11 +904,13 @@ export async function openInfoModal(book, startTab = '') {
 
   // ── Tab switching ─────────────────────────────────────────────────────────────
   let readingLoaded = false;
+  let relatedLoaded = false;
 
   const switchTab = (id) => {
     backdrop.querySelectorAll('.imt-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     backdrop.querySelectorAll('.imt-panel').forEach(p => { p.style.display = p.id === `imt-${id}` ? '' : 'none'; });
     if (id === 'reading' && !readingLoaded) { readingLoaded = true; loadReadingTab(); }
+    if (id === 'related' && !relatedLoaded) { relatedLoaded = true; loadRelatedTab(); }
   };
 
   backdrop.querySelectorAll('.imt-tab').forEach(btn => {
@@ -1268,6 +1277,53 @@ export async function openInfoModal(book, startTab = '') {
         }
       });
 
+    } catch (err) {
+      inner.innerHTML = `<div class="imt-empty">${t('common.err_prefix')}${err.message}</div>`;
+    }
+  }
+
+  // ── Related tab: BookOrbit "more like this" + series info (lazy-loaded) ───────
+  async function loadRelatedTab() {
+    const inner = backdrop.querySelector('#imt-related-inner');
+    try {
+      const data = await apiFetch(`/books/${fullBook.id}/related`);
+      if (!data.enabled) {
+        inner.innerHTML = `<div class="imt-empty">${t('library.related_disabled')}</div>`;
+        return;
+      }
+
+      const cardHtml = (b) => `
+        <div class="imt-related-card" title="${escHtml(b.title || '')}">
+          <div class="imt-related-cover-wrap">
+            ${b.hasCover
+              ? `<img class="imt-related-cover" src="/api/books/bookorbit-cover/${b.boBookId}?token=${token}" alt="" loading="lazy" />`
+              : `<div class="imt-related-cover imt-related-cover-ph">\u{1F4D6}</div>`}
+          </div>
+          <div class="imt-related-title">${escHtml(b.title || '')}</div>
+          ${b.authors?.length ? `<div class="imt-related-author">${escHtml(b.authors.join(', '))}</div>` : ''}
+        </div>`;
+
+      const sections = [];
+
+      if (fullBook.read_status === 'read' && data.nextInSeries) {
+        sections.push(`
+          <div class="imt-section-title">${t('library.related_next_in_series')}</div>
+          <div class="imt-related-scroller">${cardHtml(data.nextInSeries)}</div>`);
+      }
+
+      if (data.seriesBooks?.length) {
+        sections.push(`
+          <div class="imt-section-title" style="margin-top:.75rem">${t('library.related_series')}</div>
+          <div class="imt-related-scroller">${data.seriesBooks.map(cardHtml).join('')}</div>`);
+      }
+
+      if (data.recommendations?.length) {
+        sections.push(`
+          <div class="imt-section-title" style="margin-top:.75rem">${t('library.related_more_like_this')}</div>
+          <div class="imt-related-scroller">${data.recommendations.map(cardHtml).join('')}</div>`);
+      }
+
+      inner.innerHTML = sections.length ? sections.join('') : `<div class="imt-empty">${t('library.related_empty')}</div>`;
     } catch (err) {
       inner.innerHTML = `<div class="imt-empty">${t('common.err_prefix')}${err.message}</div>`;
     }
@@ -2058,6 +2114,9 @@ export async function initLibrary() {
   // Register early so we never miss an online/offline event during async setup
   window.addEventListener('online',  () => loadBooks().catch(() => {}));
   window.addEventListener('offline', () => loadBooks().catch(() => {}));
+
+  // Whether to show the info modal's "Related" (BookOrbit recommendations) tab.
+  apiFetch('/settings').then(s => { bookorbitEnabled = !!s.bookorbit_sync_enabled; }).catch(() => {});
 
   // SW download progress messages
   if (isOfflineSupported) {

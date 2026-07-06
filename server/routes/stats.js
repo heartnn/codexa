@@ -21,12 +21,12 @@ router.post('/session', (req, res) => {
 
 // PATCH /api/stats/session/:id — close / update session
 router.patch('/session/:id', (req, res) => {
-  const { end_ts, pages_nav } = req.body || {};
+  const { end_ts, pages_nav, end_pct, start_pct } = req.body || {};
   const db = getDb();
   const sess = db.prepare('SELECT id, book_id FROM reading_sessions WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!sess) return res.status(404).json({ error: 'Session not found' });
-  db.prepare('UPDATE reading_sessions SET end_ts = ?, pages_nav = ? WHERE id = ?')
-    .run(end_ts || Math.floor(Date.now() / 1000), pages_nav || 0, sess.id);
+  db.prepare('UPDATE reading_sessions SET end_ts = ?, pages_nav = ?, end_pct = ?, start_pct = ? WHERE id = ?')
+    .run(end_ts || Math.floor(Date.now() / 1000), pages_nav || 0, end_pct ?? null, start_pct ?? null, sess.id);
   bookorbit.triggerSync(req.user.id, sess.book_id); // upload the closed session to BookOrbit
   res.json({ success: true });
 });

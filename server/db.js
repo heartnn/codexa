@@ -213,6 +213,14 @@ function initDb() {
     [`ALTER TABLE books          ADD COLUMN rating                  INTEGER`,                 'books.rating'],
     [`ALTER TABLE books          ADD COLUMN status_modified         INTEGER`,                 'books.status_modified'],
     [`ALTER TABLE bookorbit_sync_state ADD COLUMN bo_file_id        INTEGER DEFAULT NULL`,    'bookorbit_sync_state.bo_file_id'],
+    // Percentage (0-1 fraction) at the start/end of a reading session, so BookOrbit sync can
+    // send an explicit progressDelta instead of letting BookOrbit infer one from session history
+    // (see bookorbitSync.uploadSessions).
+    [`ALTER TABLE reading_sessions ADD COLUMN end_pct              REAL    DEFAULT NULL`,     'reading_sessions.end_pct'],
+    [`ALTER TABLE reading_sessions ADD COLUMN start_pct            REAL    DEFAULT NULL`,     'reading_sessions.start_pct'],
+    // Bookmark sync tracking (create/delete only — BookOrbit's bookmark API has no update route)
+    [`ALTER TABLE bookmarks       ADD COLUMN bo_id                 TEXT    DEFAULT ''`,       'bookmarks.bo_id'],
+    [`ALTER TABLE bookmarks       ADD COLUMN deleted                INTEGER DEFAULT 0`,       'bookmarks.deleted'],
   ];
   for (const [sql, label] of migrations) {
     try {

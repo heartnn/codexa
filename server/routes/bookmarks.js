@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb }            = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const bookorbit             = require('../services/bookorbitSync');
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -13,7 +14,7 @@ router.get('/:bookId', (req, res) => {
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
   const rows = db.prepare(
-    'SELECT id, cfi, pct, label, created_at FROM bookmarks WHERE user_id = ? AND book_id = ? ORDER BY pct ASC'
+    'SELECT id, cfi, pct, label, created_at FROM bookmarks WHERE user_id = ? AND book_id = ? AND deleted = 0 ORDER BY pct ASC'
   ).all(req.user.id, book.id);
   res.json(rows);
 });
@@ -35,10 +36,12 @@ router.post('/:bookId', (req, res) => {
   const row = db.prepare(
     'SELECT id, cfi, pct, label, created_at FROM bookmarks WHERE id = ?'
   ).get(result.lastInsertRowid);
+  bookorbit.triggerSync(req.user.id, book.id);
   res.status(201).json(row);
 });
 
 // PUT /api/bookmarks/:bookId/:id — update label
+// Note: this does not propagate to BookOrbit — its bookmark API has no update route.
 router.put('/:bookId/:id', (req, res) => {
   const { label } = req.body || {};
   const db  = getDb();
@@ -52,13 +55,20 @@ router.put('/:bookId/:id', (req, res) => {
 });
 
 // DELETE /api/bookmarks/:bookId/:id — delete one bookmark
+// When BookOrbit sync is enabled the row is tombstoned (deleted = 1) so the
+// deletion can propagate; otherwise it is removed outright.
 router.delete('/:bookId/:id', (req, res) => {
   const db = getDb();
   const bm = db.prepare('SELECT id FROM bookmarks WHERE id = ? AND user_id = ?')
                .get(req.params.id, req.user.id);
   if (!bm) return res.status(404).json({ error: 'Bookmark not found' });
 
-  db.prepare('DELETE FROM bookmarks WHERE id = ?').run(bm.id);
+  if (bookorbit.isEnabled(req.user.id)) {
+    db.prepare('UPDATE bookmarks SET deleted = 1 WHERE id = ?').run(bm.id);
+    bookorbit.triggerSync(req.user.id, Number(req.params.bookId));
+  } else {
+    db.prepare('DELETE FROM bookmarks WHERE id = ?').run(bm.id);
+  }
   res.status(204).end();
 });
 

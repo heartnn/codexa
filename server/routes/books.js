@@ -375,6 +375,38 @@ router.post('/:id/reextract-cover', (req, res) => {
   res.json({ cover_path: meta.cover_path, description: meta.description });
 });
 
+// GET /api/books/:id/related — BookOrbit "more like this" + series info.
+// Only meaningful when BookOrbit extended sync is enabled and this book is mapped to a
+// BookOrbit book; otherwise responds with `enabled: false` / empty lists so the client can
+// simply hide the section.
+router.get('/:id/related', async (req, res) => {
+  const db   = getDb();
+  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
+  if (!bookorbit.isEnabled(req.user.id)) return res.json({ enabled: false, mapped: false, recommendations: [], seriesBooks: [], nextInSeries: null });
+
+  try {
+    res.json(await bookorbit.getRecommendations(req.user.id, book.id));
+  } catch (e) {
+    res.json({ enabled: true, mapped: false, recommendations: [], seriesBooks: [], nextInSeries: null });
+  }
+});
+
+// GET /api/books/bookorbit-cover/:boBookId — proxy a cover thumbnail for a BookOrbit-side book
+// (used to render "more like this" / series cards, which reference books outside this library).
+router.get('/bookorbit-cover/:boBookId', async (req, res) => {
+  if (!bookorbit.isEnabled(req.user.id)) return res.status(404).end();
+  try {
+    const asset = await bookorbit.getCover(req.user.id, req.params.boBookId);
+    if (!asset.ok) return res.status(404).end();
+    res.set('Content-Type', asset.contentType);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(asset.buffer);
+  } catch {
+    res.status(404).end();
+  }
+});
+
 // ── DELETE /api/books/:id ─────────────────────────────────────────────────────
 router.delete('/:id', (req, res) => {
   const db   = getDb();

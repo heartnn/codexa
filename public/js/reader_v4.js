@@ -340,6 +340,7 @@ let _annotToolbarTimer = null; // guards against mouseup firing before dblclick 
 // Reading statistics tracking
 let statsSessionId = null;            // active reading_sessions.id
 let sessionPageCount = 0;             // page navigation events in current session
+let sessionStartPct = null;           // currentPct snapshot when the session started
 
 // ── Fork sync policy (juliefuller fork; extends upstream thehijacker/codexa) ──
 // Upstream syncs KOReader progress only on chapter boundaries and book close.
@@ -5771,6 +5772,7 @@ async function startStatsSession(bookId) {
     });
     statsSessionId = res?.id || null;
     sessionPageCount = 0;
+    sessionStartPct = currentPct > 0 ? currentPct : null;
     log('[stats] session started id:', statsSessionId);
   } catch (e) {
     warn('[stats] failed to start session:', e.message);
@@ -5781,8 +5783,11 @@ function endStatsSessionBackground() {
   if (!statsSessionId) return;
   const id  = statsSessionId;
   const pgs = sessionPageCount;
+  const startPct = sessionStartPct;
+  const pct = currentPct > 0 ? currentPct : null;
   statsSessionId   = null;
   sessionPageCount = 0;
+  sessionStartPct  = null;
   const token = getToken();
   const headers = {
     'Content-Type': 'application/json',
@@ -5791,7 +5796,7 @@ function endStatsSessionBackground() {
   fetch(`/api/stats/session/${id}`, {
     method: 'PATCH',
     headers,
-    body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs }),
+    body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct }),
     keepalive: true,
   }).catch(() => {});
 }
@@ -5800,13 +5805,16 @@ async function endStatsSession() {
   if (!statsSessionId) return;
   const id  = statsSessionId;
   const pgs = sessionPageCount;
+  const startPct = sessionStartPct;
+  const pct = currentPct > 0 ? currentPct : null;
   statsSessionId   = null;
   sessionPageCount = 0;
+  sessionStartPct  = null;
   try {
     await apiFetch(`/stats/session/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs }),
+      body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct }),
     });
   } catch (e) {
     warn('[stats] failed to end session:', e.message);
