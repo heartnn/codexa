@@ -1,5 +1,7 @@
 services:
   codexa:
+    # :latest = latest official release. :dev tracks the latest main-branch commit for early
+    # testing between releases — it can change at any time and is not recommended for regular use.
     image: ghcr.io/thehijacker/codexa:latest
     container_name: codexa
     restart: unless-stopped

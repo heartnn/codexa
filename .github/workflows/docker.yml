@@ -36,11 +36,14 @@ jobs:
         id: tags
         run: |
           IMAGE="${{ steps.reg.outputs.image }}"
-          TAGS="${IMAGE}:latest"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Official release (git tag vX.Y.Z pushed) — update :latest and the versioned tag.
             VERSION="${{ github.ref_name }}"
             VERSION="${VERSION#v}"
-            TAGS="${TAGS},${IMAGE}:${VERSION}"
+            TAGS="${IMAGE}:latest,${IMAGE}:${VERSION}"
+          else
+            # Plain push to main — publish under :dev only, never touch :latest.
+            TAGS="${IMAGE}:dev"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 

@@ -15,6 +15,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **🔄 Real two-way KOReader sync.** A built-in KOSync-compatible server keeps your e-reader and your phone on the same page — no extra software, no cloud.
 - **🖥️ Truly works everywhere.** Desktop browsers, mobile PWA, Android APK, and iOS IPA, with a one-tap **Display size** control that scales the UI on everything from phones to big e-ink tablets to desktop monitors.
 - **🔌 Plays well with your stack.** Browse and download from any OPDS catalogue (Calibre-Web, Komga, Kavita, Ubooquity…) and sync whole folders into shelves.
+- **🛰️ Deep BookOrbit integration.** Native library browser, peek books before downloading them, and optional two-way sync of highlights, reading sessions, progress, and status/rating with a self-hosted BookOrbit server.
 - **🏠 Self-hosted and private.** Multi-user, JWT-authenticated, and everything — books, covers, highlights, positions — lives on **your** server.
 
 ---
@@ -44,10 +45,11 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **CBZ & CBR comic books** — read comic archives directly; two-page spread on desktop; automatic CBR→CBZ conversion; ComicInfo.xml metadata
 - **Fixed-layout EPUB** — manga, children's books, and art books rendered at pixel-accurate dimensions via CSS transform scaling
 - **Exact position restore** — saves the page number per chapter; reopens on the precise page (not just approximate %)
+- **Peek mode** — open any book read-only without saving your position, including books not yet downloaded from a connected BookOrbit server
 - **Bookmarks** — add, label, and jump to bookmarks; badge shows bookmark count
 - **Highlights & annotations** — highlight in four colours (yellow, green, blue, pink) with optional notes; tap any highlight to edit or delete
 - **Search** — full-text search within a book with result navigation and back/accept buttons
-- **Dictionary lookup** — double-tap any word; supports multiple local StarDict dictionaries (`.ifo/.idx/.dict`)
+- **Dictionary lookup** — double-tap any word; supports multiple local StarDict dictionaries (`.ifo/.idx/.dict`); defaults to dictionaries matching a book's own language on first open
 - **Footnote popup** — inline footnote and endnote display without leaving the page
 - **Bionic reading** — emphasises word prefixes to guide the eye for faster reading
 - **Two-page spread** — optional side-by-side layout for wider screens
@@ -67,6 +69,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **Automatic progress saving** — position saved locally and to the server; restored on any device
 - **KOReader sync** — built-in KOSync-compatible server; connect KOReader devices with no extra software
 - **External KOSync server** — also works with a separate KOSync server; conflict-resolution dialog when positions differ
+- **BookOrbit extended sync** — optional two-way sync of highlights, reading sessions, live reading progress, and book status/rating with a self-hosted BookOrbit server
 - **Interrupted session recovery** — banner on next visit offers one-tap resume if the app was closed mid-chapter
 
 ### Offline & Mobile
@@ -81,6 +84,8 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **Shelves** — organise books into named collections; bulk assign/remove
 - **OPDS browser** — browse and download from any OPDS catalogue (Calibre-Web, Komga, Kavita, …)
 - **OPDS shelf sync** — bulk-download an entire OPDS folder into a shelf; stale-book detection
+- **BookOrbit library browser** — native browsing of a self-hosted BookOrbit server's libraries, smart scopes, collections, series, and authors; add books to Codexa, peek them without downloading, edit collection membership, and view any book on BookOrbit directly
+- **BookOrbit collection/smart scope sync** — link a shelf to a BookOrbit collection or smart scope for one-click resync, same as OPDS shelf sync
 - **Reading statistics** — time read, pages turned, sessions, books started/finished, per-book history
 - **Series support** — series name, number, and one-click series filter
 - **Sort & search** — sort by date, title, author, progress, or series; real-time library search
@@ -183,6 +188,12 @@ Optionally, you can also connect to an external KOSync server in **Settings → 
 
 Navigate to **OPDS Browser** in the sidebar.  
 Add any OPDS-compatible catalogue (Calibre-Web, Komga, Kavita, Ubooquity, Bookwyrm…) in **Settings → OPDS Servers**.
+
+---
+
+## BookOrbit
+
+Add your server URL in **Settings → BookOrbit** to enable the native library browser (libraries, smart scopes, collections, series, authors) and, optionally, two-way sync of highlights, reading sessions, reading progress, and status/rating. Requires BookOrbit **v2.1.0 or higher**.
 
 ---
 

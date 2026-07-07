@@ -40,9 +40,10 @@ async function checkForUpdate(localVersion) {
   if (sessionStorage.getItem('br_update_checked')) return;
   sessionStorage.setItem('br_update_checked', '1');
   try {
-    const r = await fetch('https://raw.githubusercontent.com/thehijacker/codexa/refs/heads/main/package.json');
+    const r = await fetch('https://api.github.com/repos/thehijacker/codexa/releases/latest');
     if (!r.ok) return;
-    const { version: remote } = await r.json();
+    const { tag_name } = await r.json();
+    const remote = String(tag_name || '').replace(/^v/, '');
     if (remote && isNewerVersion(remote, localVersion)) {
       document.querySelectorAll('a.logo').forEach(logo => {
         if (logo.querySelector('.update-badge')) return;

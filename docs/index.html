@@ -70,7 +70,7 @@
           <ul class="nav-sub">
             <li><a href="#settings-general"   data-section="settings" data-scroll="settings-general">General</a></li>
             <li><a href="#settings-kosync"    data-section="settings" data-scroll="settings-kosync">KOReader Sync</a></li>
-            <li><a href="#settings-bookorbit" data-section="settings" data-scroll="settings-bookorbit">BookOrbit Sync</a></li>
+            <li><a href="#settings-bookorbit" data-section="settings" data-scroll="settings-bookorbit">BookOrbit</a></li>
             <li><a href="#settings-opds-srv"  data-section="settings" data-scroll="settings-opds-srv">OPDS Servers</a></li>
             <li><a href="#settings-dicts"     data-section="settings" data-scroll="settings-dicts">Dictionaries</a></li>
             <li><a href="#settings-admin"     data-section="settings" data-scroll="settings-admin">Admin</a></li>
@@ -166,6 +166,7 @@
             <li><a href="#reader-dict"      data-section="reader" data-scroll="reader-dict">Dictionary Lookup</a></li>
             <li><a href="#reader-footnotes" data-section="reader" data-scroll="reader-footnotes">Footnotes</a></li>
             <li><a href="#reader-progress"  data-section="reader" data-scroll="reader-progress">Reading Progress</a></li>
+            <li><a href="#reader-finished"  data-section="reader" data-scroll="reader-finished">Finishing a Book</a></li>
             <li><a href="#reader-jump"      data-section="reader" data-scroll="reader-jump">Jump to Position</a></li>
             <li><a href="#reader-fullscreen" data-section="reader" data-scroll="reader-fullscreen">Fullscreen</a></li>
             <li><a href="#reader-sleep"     data-section="reader" data-scroll="reader-sleep">Sleep Timer</a></li>
@@ -188,6 +189,18 @@
             <li><a href="#cxreader-features" data-section="cxreader" data-scroll="cxreader-features">Engine Highlights</a></li>
             <li><a href="#cxreader-position" data-section="cxreader" data-scroll="cxreader-position">Exact Position Restore</a></li>
             <li><a href="#cxreader-fixed"    data-section="cxreader" data-scroll="cxreader-fixed">Fixed-layout EPUBs</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit Library</a>
+          <ul class="nav-sub">
+            <li><a href="#bol-setup"  data-section="bookorbit-library" data-scroll="bol-setup">Setup</a></li>
+            <li><a href="#bol-browse" data-section="bookorbit-library" data-scroll="bol-browse">Browsing</a></li>
+            <li><a href="#bol-peek"   data-section="bookorbit-library" data-scroll="bol-peek">Peeking a Book</a></li>
+            <li><a href="#bol-collections" data-section="bookorbit-library" data-scroll="bol-collections">Collections</a></li>
+            <li><a href="#bol-shelfsync" data-section="bookorbit-library" data-scroll="bol-shelfsync">Sync to a Shelf</a></li>
+            <li><a href="#bol-mobile" data-section="bookorbit-library" data-scroll="bol-mobile">Mobile Drawer</a></li>
+            <li><a href="#bol-reachability" data-section="bookorbit-library" data-scroll="bol-reachability">Reachability Warning</a></li>
           </ul>
         </li>
         <li>
@@ -329,7 +342,7 @@
             <li><strong>Automatic position saving</strong> — on every device</li>
             <li><strong>Built-in KOSync-compatible server</strong> — for KOReader devices</li>
             <li><strong>External KOSync server support</strong> — with conflict resolution</li>
-            <li><strong>BookOrbit extended sync</strong> — optional two-way sync of highlights, reading sessions, and book status/rating to a self-hosted <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit</a> server</li>
+            <li><strong>BookOrbit extended sync</strong> — optional two-way sync of highlights, reading sessions, live reading progress, and book status/rating to a self-hosted <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit</a> server</li>
             <li><strong>Interrupted session recovery banner</strong></li>
             <li><strong>Reading statistics</strong> — time read, pages turned, sessions, books started/finished</li>
           </ul>
@@ -354,6 +367,8 @@
             <li><strong>Online library</strong> — browse OPDS catalogs from Calibre-Web, Book Orbit, Booklore, Komga, Kavita, and more</li>
             <li><strong>Bulk shelf sync</strong> — from OPDS folder with stale-book detection</li>
             <li><strong>OPDS-linked shelves</strong> — synced shelves remember their source folder; one click opens it in the OPDS browser or re-triggers a sync</li>
+            <li><strong><a href="#bookorbit-library" data-section="bookorbit-library">Native BookOrbit library browser</a></strong> — browse libraries, smart scopes, collections, series, and authors on a self-hosted BookOrbit server; add books to Codexa or peek them without downloading</li>
+            <li><strong>BookOrbit collection sync</strong> — link a Codexa shelf to a BookOrbit collection or smart scope, same one-click resync as OPDS-linked shelves</li>
             <li><strong>Series support</strong> — with series name, number, and one-click filter</li>
             <li><strong>Sort</strong> — by date, title, author, progress, or series</li>
             <li><strong>Real-time library search</strong></li>
@@ -891,24 +906,33 @@ data/<br>
       </p>
       <p>The <strong>Clear</strong> button removes all stored external server credentials.</p>
 
-      <h2 id="settings-bookorbit">BookOrbit Sync</h2>
+      <h2 id="settings-bookorbit">BookOrbit</h2>
       <p>
-        Codexa can optionally sync highlights, reading sessions, and book status/rating with a
-        self-hosted <strong>BookOrbit</strong> server. This is an opt-in feature — it has no
-        effect unless you enable it and provide BookOrbit account credentials. See the
-        <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit Sync</a> section for
-        a full description of what syncs and how it works.
+        BookOrbit has its own settings tab, separate from KOReader Sync. It has two independent
+        purposes: browsing your <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit
+        library</a> from inside Codexa, and optionally syncing highlights, reading sessions, live
+        reading progress, and book status/rating with that same server. See
+        <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit Library</a> and
+        <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit Sync</a> for a full
+        description of each.
       </p>
       <ol class="steps">
-        <li>Make sure a BookOrbit server URL is already saved under <strong>KOReader Sync → External KOSync Server</strong> — the same server is used for BookOrbit Sync.</li>
-        <li>Enter your BookOrbit <strong>account username</strong> and <strong>account password</strong>. These are your BookOrbit web login credentials, which may differ from the KOReader sync sub-account credentials.</li>
-        <li>Tick <strong>Enable BookOrbit extended sync</strong> and click <strong>Save</strong>.</li>
+        <li>Enter your BookOrbit <strong>server URL</strong>. This is its own field — it no longer needs to match the URL saved under KOReader Sync → External KOSync Server, though it usually points at the same server.</li>
+        <li>Click <strong>Test connection</strong> to confirm Codexa can reach the server.</li>
+        <li>To also enable extended sync, enter your BookOrbit <strong>account username</strong> and <strong>account password</strong> (your BookOrbit web login — this may differ from the KOReader sync sub-account credentials), tick <strong>Enable BookOrbit extended sync</strong>, then click <strong>Save</strong>.</li>
       </ol>
       <p>
-        The toggle is disabled (greyed out) until a server URL and account password are saved.
+        Only the server URL is required to browse the BookOrbit library. The extended-sync toggle
+        stays disabled (greyed out) until a server URL and account password are both saved.
         Saving the credentials and the toggle in a single click is supported — you do not need
         to save them separately first.
       </p>
+      <div class="callout warning">
+        <strong>&#9888; Unreachable server</strong>
+        If the saved BookOrbit URL cannot be reached, a warning badge appears next to the
+        BookOrbit entry in the sidebar and in the reader. Progress sync with KOReader/KOSync is
+        unaffected — only BookOrbit browsing and extended sync depend on this connection.
+      </div>
 
       <h2 id="settings-opds-srv">OPDS Servers</h2>
       <p>
@@ -1681,6 +1705,13 @@ data/<br>
         Manually-created shelves are never linked. Only shelves created (or updated) by an OPDS
         sync have the linked icon and banner.
       </p>
+      <p>
+        A shelf can be linked the same way to a <strong>BookOrbit</strong> collection or smart
+        scope instead of an OPDS folder — see
+        <a href="#bol-shelfsync" data-section="bookorbit-library" data-scroll="bol-shelfsync">Sync
+        to a Shelf</a> in the BookOrbit Library section. The banner, resync button, and unlink
+        option all work identically.
+      </p>
 
       <a class="back-top" href="#about">&#8593; Top</a>
     </section>
@@ -1851,6 +1882,13 @@ data/<br>
       the hashes won't match. Enter the MD5 hash from KOReader here to link them manually.</p>
       <p><strong>Re-download from OPDS:</strong> if this book was originally imported from an
       OPDS source, you can force-download the latest version from that source URL.</p>
+      <p><strong>Search to replace:</strong> search a source and swap in a different file for
+      this book — for example a better-quality copy or a different edition. If
+      <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit</a> is set up, it
+      appears first in the source dropdown above your OPDS servers. Metadata shown elsewhere in
+      the dialog refreshes immediately after a replacement, no need to close and reopen it.</p>
+      <p>If this book is linked to a BookOrbit id, a <strong>View on BookOrbit</strong> link opens
+      it on your BookOrbit server in a new tab.</p>
 
       <figure>
         <img src="screenshots/book_kosync.png" alt="Book details dialog with KOSync tab">
@@ -2037,6 +2075,13 @@ data/<br>
         <img src="screenshots/reader/resume.png" alt="Resume closed book">
         <figcaption>Resume closed book</figcaption>
       </figure>        
+      </p>
+
+      <h2 id="reader-finished">Finishing a Book</h2>
+      <p>
+        Pressing next page on the last page of a book shows a <strong>finished</strong> screen
+        instead of doing nothing. It offers a button to return straight to the library. In
+        e-ink mode the screen is rendered in matching black-and-white instead of color.
       </p>
 
       <h2 id="reader-jump">Jump to Position</h2>
@@ -2262,6 +2307,12 @@ data/<br>
         Lists all installed dictionaries with their word count. Toggle each on/off, and use the
         up/down arrows to change lookup priority. Admins see an additional Upload button.
       </p>
+      <p>
+        The first time you open a book with no dictionary preference saved yet, Codexa
+        automatically enables dictionaries whose <em>from</em> language matches the book's own
+        language (e.g. opening a Slovenian book enables Slovenian dictionaries instead of
+        defaulting to English). After that, your choice is remembered per book.
+      </p>
 
       <h2 id="reader-kosync">KOReader Sync</h2>
       <p>
@@ -2289,6 +2340,15 @@ data/<br>
         <a href="#book-details" data-section="book-details">Book Details</a> dialog) to read
         without saving your position. Useful for reviewing a book without advancing your progress
         tracker.
+      </p>
+      <p>
+        A book in your <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit
+        library</a> that you haven't added to Codexa yet can also be peeked directly — tap the
+        peek button on its card. The file is fetched from BookOrbit into a temporary location and
+        opened read-only; it is deleted automatically as soon as you close the reader. If the
+        reader is closed abruptly (browser crash, force-quit) instead of normally, a background
+        cleanup job removes the temporary file within a few hours regardless, so nothing is ever
+        left behind on the server.
       </p>
 
       <a class="back-top" href="#about">&#8593; Top</a>
@@ -2399,6 +2459,102 @@ data/<br>
       <a class="back-top" href="#about">&#8593; Top</a>
     </section>
 
+    <!-- ══════════════════════════════════════════════ BookOrbit Library ═══ -->
+    <section id="bookorbit-library">
+      <h1>BookOrbit Library</h1>
+      <p class="section-subtitle">Browse, add, and peek books from a self-hosted BookOrbit server without leaving Codexa</p>
+
+      <p>
+        If you self-host a <strong>BookOrbit</strong> server, Codexa can browse its entire
+        library natively — a dedicated panel alongside your regular library and the
+        <a href="#opds" data-section="opds">Online library</a> (OPDS) browser, purpose-built
+        around BookOrbit's own organisation (libraries, smart scopes, collections, series, and
+        authors) instead of generic OPDS folders. This is entirely optional and separate from
+        <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit Sync</a> — you can
+        browse without ever enabling extended sync.
+      </p>
+
+      <h2 id="bol-setup">Setup</h2>
+      <div class="callout">
+        <strong>BookOrbit version</strong>
+        Requires BookOrbit <strong>v2.1.0 or higher</strong>.
+      </div>
+      <p>
+        Go to <strong>Settings → BookOrbit</strong>, enter your BookOrbit server URL, and click
+        <strong>Test connection</strong>. No account credentials are required just to browse —
+        only the server URL. Once saved, a <strong>BookOrbit</strong> entry appears in the left
+        sidebar.
+      </p>
+
+      <h2 id="bol-browse">Browsing</h2>
+      <p>
+        Open the <strong>BookOrbit</strong> panel from the sidebar. A left-hand nav lists six
+        sections:
+      </p>
+      <ul>
+        <li><strong>Libraries</strong> — every BookOrbit library you have access to</li>
+        <li><strong>Smart Scopes</strong> — BookOrbit's saved dynamic filters</li>
+        <li><strong>Collections</strong> — your manually curated collections</li>
+        <li><strong>Series</strong> — browse by series</li>
+        <li><strong>Authors</strong> — browse by author</li>
+        <li><strong>Book Search</strong> — search BookOrbit directly by title or author</li>
+      </ul>
+      <p>
+        Selecting an item on the left shows its books on the right, using the same grid density
+        control and sort menu as the main library. Each book card shows a
+        <strong>Add to Codexa</strong> button (permanently downloads and imports the book) and, if
+        it's already in your Codexa library, a badge instead. Cards for books already downloaded
+        also link to the book's <a href="#book-details" data-section="book-details">Book Details</a>
+        dialog, which includes a <strong>View on BookOrbit</strong> link that opens the book on
+        your BookOrbit server in a new tab (or the system browser, if Codexa is installed as a
+        PWA/app).
+      </p>
+
+      <h2 id="bol-peek">Peeking a Book</h2>
+      <p>
+        Every card also has a <strong>Peek</strong> button, even for books you haven't added to
+        Codexa yet. See <a href="#reader-peek" data-section="reader" data-scroll="reader-peek">Peek
+        Mode</a> in the Reader section for how peeking an un-downloaded book works — in short, the
+        file is fetched temporarily, opened read-only, and cleaned up automatically when you close
+        the reader (or shortly after, if the tab was closed abruptly).
+      </p>
+
+      <h2 id="bol-collections">Collections</h2>
+      <p>
+        Click <strong>Collections</strong> on a book card to open the collection membership
+        editor — a checklist of every BookOrbit collection you have. Tick or untick collections and
+        click <strong>Save collections</strong> to update membership directly on the BookOrbit
+        server, without needing to switch to BookOrbit's own web interface.
+      </p>
+
+      <h2 id="bol-shelfsync">Sync to a Shelf</h2>
+      <p>
+        Open a <strong>Collection</strong> or <strong>Smart Scope</strong> and click
+        <strong>Sync to a Codexa shelf</strong> to download every book it contains into a named
+        shelf, exactly like <a href="#shelf-sync" data-section="shelves" data-scroll="shelf-sync">OPDS
+        Folder Sync</a>. The shelf becomes linked — it shows the same top-of-library banner with
+        an <strong>Open in BookOrbit</strong> link and a resync button, and re-running the sync
+        only downloads books that are new since last time. Unlink a shelf from the shelf's edit
+        dialog with <strong>Unlink from BookOrbit</strong>; the shelf and its books are kept.
+      </p>
+
+      <h2 id="bol-mobile">Mobile Drawer</h2>
+      <p>
+        On narrow screens, the BookOrbit nav collapses into an off-canvas drawer. Tap the
+        <strong>&#9776;</strong> button to slide it in, pick a section, and it closes
+        automatically after you make a selection.
+      </p>
+
+      <h2 id="bol-reachability">Reachability Warning</h2>
+      <p>
+        If Codexa cannot reach your saved BookOrbit server, a warning appears next to the
+        BookOrbit entry in the sidebar, and in the reader if BookOrbit Sync is enabled. This does
+        not affect KOReader/KOSync progress sync, which is entirely independent.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
     <!-- ══════════════════════════════════════════════ BookOrbit Sync ═══ -->
     <section id="bookorbit-sync">
       <h1>BookOrbit Sync</h1>
@@ -2413,9 +2569,10 @@ data/<br>
 
       <div class="callout">
         <strong>Prerequisite</strong>
-        You must already have a BookOrbit server URL saved under
-        <strong>Settings → KOReader Sync → External KOSync Server</strong>. BookOrbit Sync
-        uses the same server; no additional URL is needed.
+        Save your BookOrbit server URL under <strong>Settings → BookOrbit</strong> first — see
+        <a href="#settings-bookorbit" data-section="settings" data-scroll="settings-bookorbit">Settings</a>.
+        This field is independent of the URL saved under KOReader Sync → External KOSync Server.
+        Requires BookOrbit <strong>v2.1.0 or higher</strong>.
       </div>
 
       <h2 id="bo-what">What Syncs</h2>
@@ -2434,6 +2591,11 @@ data/<br>
               <td><strong>Reading sessions</strong></td>
               <td>Codexa → BookOrbit</td>
               <td>Automatically when you close a book (session ≥&nbsp;60&nbsp;s and ≥&nbsp;2 pages)</td>
+            </tr>
+            <tr>
+              <td><strong>Live reading progress</strong></td>
+              <td>Codexa → BookOrbit</td>
+              <td>Pushed on every KOReader/KOSync sync, not just when you close the book, so BookOrbit's own reader and other clients see your current position sooner</td>
             </tr>
             <tr>
               <td><strong>Read status</strong></td>
@@ -2456,8 +2618,7 @@ data/<br>
 
       <h2 id="bo-setup">Setup</h2>
       <ol class="steps">
-        <li>Go to <strong>Settings → KOReader Sync</strong> and save your BookOrbit server URL under <em>External KOSync Server</em> if you have not already done so.</li>
-        <li>Scroll down to <strong>Settings → BookOrbit Sync</strong>.</li>
+        <li>Go to <strong>Settings → BookOrbit</strong> and save your BookOrbit server URL, then click <strong>Test connection</strong>.</li>
         <li>Enter your BookOrbit <strong>account username</strong> and <strong>account password</strong>. These are your BookOrbit web login credentials — not the KOReader sync sub-account credentials.</li>
         <li>Tick <strong>Enable BookOrbit extended sync</strong>.</li>
         <li>Click <strong>Save</strong>. Codexa immediately runs a first sync across your library.</li>
