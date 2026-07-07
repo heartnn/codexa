@@ -1,9 +1,10 @@
 import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
-import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts, setShelfBadge } from './sidebar.js';
+import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts, setShelfBadge, setBookorbitNavVisible } from './sidebar.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
 import { openSyncModal, openOpdsBrowserAtFolder } from './opds.js';
+import { openBookorbitSyncModal, openBookorbitBrowserAt } from './bookorbit.js';
 import { clearProgress } from './progress-outbox.js';
 import {
   isOfflineSupported,
@@ -22,7 +23,9 @@ let books               = [];
 let booksLoaded         = false; // true only after first successful loadBooks()
 let currentShelfId      = 'all';
 let currentShelfBookIds = null; // null = use category logic
-let currentLinkedOpds   = null; // { serverId, folderUrl, shelfId, shelfName, lastSyncedAt } or null
+// { type:'opds', serverId, folderUrl, shelfId, shelfName, lastSyncedAt } or
+// { type:'bookorbit', source, id, shelfId, shelfName, lastSyncedAt } or null
+let currentLinkedShelf  = null;
 const _autoSyncCooldown = new Map(); // shelfId → timestamp of last auto-sync
 let editMode            = false;
 let selectedBooks       = new Set();
@@ -36,6 +39,7 @@ let _activeCardMenu = null; // { popup, btn, onOutsideClick, onEsc }
 // ── Offline state ─────────────────────────────────────────────────────────────
 let isOfflineMode    = false;
 let bookorbitEnabled = false; // whether BookOrbit extended sync is on, for the info modal's "Related" tab
+let bookorbitUrl     = '';    // BookOrbit server base URL, for the info modal's "View on BookOrbit" link
 let offlineBooks     = [];        // IDB snapshot used when server is unreachable
 let downloadedIds    = new Set(); // bookIds currently stored offline
 let downloadingIds   = new Set(); // bookIds with an active download in progress
@@ -70,7 +74,7 @@ function formatSize(bytes) {
     : (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
-function sanitizeHtml(html) {
+export function sanitizeHtml(html) {
   if (!html) return '';
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
@@ -116,16 +120,21 @@ function sortBooks(list) {
   return sorted;
 }
 
-function initSortMenu() {
-  const select = document.getElementById('sort-select');
-  const btn = document.getElementById('sort-menu-btn');
-  const label = document.getElementById('sort-menu-label');
-  const list = document.getElementById('sort-menu-list');
+// Builds a custom checkmark dropdown (button + list) driven by a hidden native <select> — the
+// select stays the single source of truth (its value changes and dispatches a real 'change'
+// event, so existing `select.addEventListener('change', ...)` code elsewhere needs no changes).
+// Parameterized so both the main library grid and the BookOrbit browser can share one
+// implementation instead of two near-identical copies.
+export function initSortMenuFor(selectId, btnId, labelId, listId) {
+  const select = document.getElementById(selectId);
+  const btn = document.getElementById(btnId);
+  const label = document.getElementById(labelId);
+  const list = document.getElementById(listId);
   if (!select || !btn || !label || !list) return;
 
   function syncLabel() {
     const selected = select.options[select.selectedIndex];
-    label.textContent = selected?.textContent || 'Razvrsti';
+    label.textContent = selected?.textContent || '';
     list.querySelectorAll('.sort-menu-option').forEach(opt => {
       const active = opt.dataset.value === select.value;
       opt.classList.toggle('active', active);
@@ -750,6 +759,7 @@ export async function openInfoModal(book, startTab = '') {
               ? `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_delete_offline')}"><img src="/images/delete_offline.svg" class="nav-icon nav-icon-delete-offline" alt="${t('library.btn_delete_offline')}"></button>`
               : `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_download_offline')}"><img src="/images/download_offline.svg" class="nav-icon nav-icon-download-offline" alt="${t('library.btn_download_offline')}"></button>`) : ''}
             ${isOfflineMode ? '' : `<a class="imt-action-btn" href="/api/books/${fullBook.id}/file?download=1&token=${token}" download title="${t('library.btn_download')}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt="${t('library.btn_download')}"></a>`}
+            ${fullBook.bo_book_id && bookorbitUrl ? `<a class="imt-action-btn" href="${escHtml(bookorbitUrl.replace(/\/+$/, ''))}/book/${fullBook.bo_book_id}" target="_blank" rel="noopener" title="${t('library.btn_view_bookorbit')}"><img src="/images/bookorbit.svg" class="nav-icon nav-icon-bookorbit" alt="${t('library.btn_view_bookorbit')}"></a>` : ''}
             ${isOfflineMode ? '' : `<button class="imt-action-btn imt-delete-btn" id="info-modal-delete" title="${t('library.btn_del_book')}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt="${t('library.btn_del_book')}"></button>`}
           </div>
         </div>
@@ -1079,14 +1089,18 @@ export async function openInfoModal(book, startTab = '') {
     const ikShowError = (msg) => { ikError.textContent = msg; ikError.style.display = msg ? '' : 'none'; };
 
     let serversLoaded = false;
+    // BookOrbit is offered first (when enabled), above the user's OPDS catalogs — matches how
+    // most users would already have BookOrbit configured as their primary source.
     const ikLoadServers = async () => {
       if (serversLoaded) return; serversLoaded = true;
+      const bookorbitOption = bookorbitEnabled ? `<option value="bookorbit">${t('library.kosync_source_bookorbit')}</option>` : '';
       try {
         const servers = await apiFetch('/opds/servers');
-        ikServer.innerHTML = servers?.length
-          ? servers.map((s, i) => `<option value="${i}">${escHtml(s.name || s.url)}</option>`).join('')
-          : `<option value="">${t('library.kosync_no_servers')}</option>`;
-      } catch { ikServer.innerHTML = `<option value="">${t('library.kosync_no_servers')}</option>`; }
+        const opdsOptions = (servers || []).map((s, i) => `<option value="${i}">${escHtml(s.name || s.url)}</option>`).join('');
+        ikServer.innerHTML = (bookorbitOption + opdsOptions) || `<option value="">${t('library.kosync_no_servers')}</option>`;
+      } catch {
+        ikServer.innerHTML = bookorbitOption || `<option value="">${t('library.kosync_no_servers')}</option>`;
+      }
     };
 
     backdrop.querySelectorAll('.imt-tab[data-tab="kosync"]').forEach(b => b.addEventListener('click', ikLoadServers));
@@ -1133,20 +1147,39 @@ export async function openInfoModal(book, startTab = '') {
       setButtonLoading(ikSearch, true);
       ikResults.innerHTML = '';
       try {
-        const feed    = await apiFetch(`/opds/search/${encodeURIComponent(serverId)}?q=${encodeURIComponent(q)}`);
-        const entries = feed?.entries || [];
-        if (!entries.length) {
-          ikResults.innerHTML = `<div class="info-modal-kosync-no-results">${t('library.kosync_no_results')}</div>`;
+        if (serverId === 'bookorbit') {
+          const data  = await apiFetch(`/bookorbit/books?source=search&q=${encodeURIComponent(q)}`);
+          const items = data?.items || [];
+          if (!items.length) {
+            ikResults.innerHTML = `<div class="info-modal-kosync-no-results">${t('library.kosync_no_results')}</div>`;
+          } else {
+            const boToken = encodeURIComponent(localStorage.getItem('br_token') || '');
+            ikResults.innerHTML = items.map(it => `
+              <div class="info-modal-kosync-result">
+                ${it.hasCover ? `<img class="info-modal-kosync-result-cover" src="/api/books/bookorbit-cover/${it.boBookId}?token=${boToken}" alt="" loading="lazy" />` : '<div class="info-modal-kosync-result-cover" style="background:var(--color-surface2)"></div>'}
+                <div class="info-modal-kosync-result-meta">
+                  <div class="info-modal-kosync-result-title">${escHtml(it.title || '?')}</div>
+                  <div class="info-modal-kosync-result-author">${escHtml(it.authors?.[0] || '')}</div>
+                </div>
+                ${it.files?.[0] ? `<button class="btn btn-primary btn-sm ik-replace-btn" data-bo-book-id="${it.boBookId}" data-file-id="${it.files[0].id}" data-format="${escHtml(it.files[0].format || '')}">${t('library.kosync_replace_btn')}</button>` : ''}
+              </div>`).join('');
+          }
         } else {
-          ikResults.innerHTML = entries.map(e => `
-            <div class="info-modal-kosync-result">
-              ${e.cover ? `<img class="info-modal-kosync-result-cover" src="${escHtml(e.cover)}" alt="" loading="lazy" />` : '<div class="info-modal-kosync-result-cover" style="background:var(--color-surface2)"></div>'}
-              <div class="info-modal-kosync-result-meta">
-                <div class="info-modal-kosync-result-title">${escHtml(e.title || '?')}</div>
-                <div class="info-modal-kosync-result-author">${escHtml(e.author || '')}</div>
-              </div>
-              ${e.acqHref ? `<button class="btn btn-primary btn-sm ik-replace-btn" data-href="${escHtml(e.acqHref)}">${t('library.kosync_replace_btn')}</button>` : ''}
-            </div>`).join('');
+          const feed    = await apiFetch(`/opds/search/${encodeURIComponent(serverId)}?q=${encodeURIComponent(q)}`);
+          const entries = feed?.entries || [];
+          if (!entries.length) {
+            ikResults.innerHTML = `<div class="info-modal-kosync-no-results">${t('library.kosync_no_results')}</div>`;
+          } else {
+            ikResults.innerHTML = entries.map(e => `
+              <div class="info-modal-kosync-result">
+                ${e.cover ? `<img class="info-modal-kosync-result-cover" src="${escHtml(e.cover)}" alt="" loading="lazy" />` : '<div class="info-modal-kosync-result-cover" style="background:var(--color-surface2)"></div>'}
+                <div class="info-modal-kosync-result-meta">
+                  <div class="info-modal-kosync-result-title">${escHtml(e.title || '?')}</div>
+                  <div class="info-modal-kosync-result-author">${escHtml(e.author || '')}</div>
+                </div>
+                ${e.acqHref ? `<button class="btn btn-primary btn-sm ik-replace-btn" data-href="${escHtml(e.acqHref)}">${t('library.kosync_replace_btn')}</button>` : ''}
+              </div>`).join('');
+          }
         }
       } catch (err) {
         ikResults.innerHTML = `<div class="info-modal-kosync-no-results">${t('common.err_prefix')}${err.message}</div>`;
@@ -1160,32 +1193,31 @@ export async function openInfoModal(book, startTab = '') {
     ikResults?.addEventListener('click', async e => {
       const btn = e.target.closest('.ik-replace-btn');
       if (!btn) return;
-      const href = btn.dataset.href;
-      if (!href) return;
+      const isBookorbit = ikServer.value === 'bookorbit';
+      const body = isBookorbit
+        ? { source: 'bookorbit', boBookId: btn.dataset.boBookId, fileId: btn.dataset.fileId, format: btn.dataset.format }
+        : { href: btn.dataset.href, serverId: Number(ikServer.value) };
+      if (!isBookorbit && !body.href) return;
+      if (isBookorbit && !body.fileId) return;
       setButtonLoading(btn, true);
       try {
         const result = await apiFetch(`/books/${fullBook.id}/file`, {
           method: 'PATCH',
-          body: JSON.stringify({ href, serverId: Number(ikServer.value) }),
+          body: JSON.stringify(body),
         });
-        fullBook.file_hash_md5 = result.file_hash_md5;
-        fullBook.kosync_hash   = '';
-        fullBook.cover_path    = result.cover_path;
-        backdrop.querySelector('#ik-md5').textContent = result.file_hash_md5;
-        backdrop.querySelector('#ik-override-row').style.display = 'none';
-        ikClear.style.display = 'none';
-        ikInput.value = result.file_hash_md5;
-        // Refresh the cover image in the still-open modal (?v= busts cache if hash unchanged)
-        const coverImg = backdrop.querySelector('.info-modal-cover');
-        if (coverImg instanceof HTMLImageElement && result.cover_path) {
-          coverImg.src = `/covers/${result.cover_path}?v=${Date.now()}`;
-        }
         if (navigator.serviceWorker?.controller) {
           navigator.serviceWorker.controller.postMessage({ type: 'DELETE_BOOK', bookId: fullBook.id });
         }
         toast.success(t('library.kosync_replace_done', { md5: result.file_hash_md5 }));
-        setButtonLoading(btn, false, '✓');
         void loadBooks();
+        // The server re-extracts full metadata (description/genres/publisher/etc — see
+        // PATCH /:id/file) but this endpoint only echoes back file_hash_md5/cover_path, and
+        // patching just those two fields left the rest of the modal (description, genres,
+        // publisher, language, series...) showing stale data until closed and reopened.
+        // Simplest correct fix: rebuild the modal the same way reopening it does — reusing
+        // openInfoModal's own GET /books/:id fetch gets everything in one go, no duplicated
+        // field-patching logic to keep in sync with the server's extraction.
+        openInfoModal(book, 'kosync').catch(() => {});
       } catch (err) {
         toast.error(t('common.err_prefix') + err.message);
         setButtonLoading(btn, false, t('library.kosync_replace_btn'));
@@ -1342,34 +1374,43 @@ export async function selectShelf(shelfId) {
   if (shelfId === 'all') {
     titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
     currentShelfBookIds = null;
-    currentLinkedOpds = null;
+    currentLinkedShelf = null;
   } else if (shelfId === 'reading') {
     titleEl.innerHTML = `<img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""> ${t('sidebar.currently_reading')}`;
     currentShelfBookIds = null;
-    currentLinkedOpds = null;
+    currentLinkedShelf = null;
   } else if (shelfId === 'downloaded') {
     titleEl.innerHTML = `<img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('sidebar.downloaded')}`;
     currentShelfBookIds = null;
-    currentLinkedOpds = null;
+    currentLinkedShelf = null;
   } else {
     const shelf = getShelves().find(s => s.id === shelfId);
-    const shelfIcon = shelf?.opds_folder_url ? 'opds_shelf' : 'shelf';
-    const shelfIconClass = shelf?.opds_folder_url ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
+    const isLinked = !!(shelf?.opds_folder_url || shelf?.bo_collection_id || shelf?.bo_smart_scope_id);
+    const shelfIcon = isLinked ? 'opds_shelf' : 'shelf';
+    const shelfIconClass = isLinked ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
     titleEl.innerHTML = `<img src="/images/${shelfIcon}.svg" class="${shelfIconClass}" alt=""> ${escHtml(shelf ? shelf.name : 'Polica')}`;
-    currentLinkedOpds = shelf?.opds_folder_url
-      ? { serverId: shelf.opds_server_id, folderUrl: shelf.opds_folder_url,
-          shelfId: shelf.id, shelfName: shelf.name, lastSyncedAt: shelf.last_synced_at || null }
-      : null;
-    if (currentLinkedOpds) {
+    if (shelf?.opds_folder_url) {
+      currentLinkedShelf = { type: 'opds', serverId: shelf.opds_server_id, folderUrl: shelf.opds_folder_url,
+        shelfId: shelf.id, shelfName: shelf.name, lastSyncedAt: shelf.last_synced_at || null };
+    } else if (shelf?.bo_collection_id || shelf?.bo_smart_scope_id) {
+      currentLinkedShelf = { type: 'bookorbit',
+        source: shelf.bo_collection_id ? 'collection' : 'smartScope',
+        id: shelf.bo_collection_id || shelf.bo_smart_scope_id,
+        shelfId: shelf.id, shelfName: shelf.name, lastSyncedAt: shelf.last_synced_at || null };
+    } else {
+      currentLinkedShelf = null;
+    }
+    if (currentLinkedShelf) {
       setShelfBadge(shelf.id, 0); // clear badge when user opens the shelf
-      _updateSyncDateDisplay(currentLinkedOpds.lastSyncedAt);
-      _autoSyncLinkedShelf(currentLinkedOpds); // fire-and-forget background sync
+      _updateSyncDateDisplay(currentLinkedShelf.lastSyncedAt);
+      updateShelfBannerForType(currentLinkedShelf.type);
+      _autoSyncLinkedShelf(currentLinkedShelf); // fire-and-forget background sync
     }
     await refreshShelfFilter(false);
   }
 
   const banner = document.getElementById('opds-shelf-banner');
-  if (banner) banner.classList.toggle('hidden', !currentLinkedOpds);
+  if (banner) banner.classList.toggle('hidden', !currentLinkedShelf);
 
   if (editMode) toggleEditMode();
   applyFilter();
@@ -1425,18 +1466,28 @@ function updateSeriesFilterBar() {
 
 let _applyFilterTimer = null;
 
+// A book counts as "currently reading" only while it's both in-progress AND not already
+// finished/abandoned — percentage alone isn't enough: CXReader's pct (cxreader/index.js
+// makePct()) is a page-fraction that never actually reaches 1.0 for paginated content, so a
+// truly-finished book would otherwise stay stuck here forever (see maybeMarkBookFinished in
+// server/utils/bookCompletion.js, which auto-sets read_status once progress crosses 95%).
+function isCurrentlyReading(b) {
+  const p = b.percentage || 0;
+  return p > 0 && p < 1 && b.read_status !== 'read' && b.read_status !== 'abandoned';
+}
+
 function applyFilter() {
   const allCountEl = document.getElementById('nav-all-count');
   const readingCountEl = document.getElementById('nav-reading-count');
   const sourceBooks = isOfflineMode ? offlineBooks : books;
   if (allCountEl)     allCountEl.textContent     = sourceBooks.length;
-  if (readingCountEl) readingCountEl.textContent = sourceBooks.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; }).length;
+  if (readingCountEl) readingCountEl.textContent = sourceBooks.filter(isCurrentlyReading).length;
 
   const q = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
   let list = sourceBooks;
 
   if (currentShelfId === 'reading') {
-    list = list.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; });
+    list = list.filter(isCurrentlyReading);
   } else if (currentShelfId === 'downloaded') {
     list = isOfflineMode ? offlineBooks : list.filter(b => downloadedIds.has(b.id));
   } else if (currentShelfBookIds !== null) {
@@ -1672,6 +1723,10 @@ function openShelfEditModal(shelf) {
       <div style="margin-top:1.25rem;margin-bottom:.75rem">
         <button class="btn btn-sm btn-outline" id="shelf-edit-unlink">${t('library.opds_unlink')}</button>
       </div>` : ''}
+      ${(shelf.bo_collection_id || shelf.bo_smart_scope_id) ? `
+      <div style="margin-top:1.25rem;margin-bottom:.75rem">
+        <button class="btn btn-sm btn-outline" id="shelf-edit-unlink-bo">${t('library.bookorbit_unlink')}</button>
+      </div>` : ''}
       <div class="modal-footer" style="justify-content:space-between">
         <button class="btn btn-danger" id="shelf-edit-delete">${t('library.shelf_btn_delete')}</button>
         <div style="display:flex;gap:.5rem">
@@ -1720,7 +1775,24 @@ function openShelfEditModal(shelf) {
         await apiFetch(`/shelves/${shelf.id}/opds-link`, { method: 'DELETE' });
         toast.success(t('library.opds_unlinked'));
         if (currentShelfId === shelf.id) {
-          currentLinkedOpds = null;
+          currentLinkedShelf = null;
+          document.getElementById('opds-shelf-banner')?.classList.add('hidden');
+          document.getElementById('page-title').innerHTML =
+            `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(shelf.name)}`;
+        }
+        await reloadShelves();
+      } catch (err) { toast.error(t('common.err_prefix') + err.message); }
+    });
+  });
+
+  backdrop.querySelector('#shelf-edit-unlink-bo')?.addEventListener('click', () => {
+    close();
+    confirmDialog(t('library.bookorbit_unlink_confirm'), async () => {
+      try {
+        await apiFetch(`/shelves/${shelf.id}/bookorbit-link`, { method: 'DELETE' });
+        toast.success(t('library.bookorbit_unlinked'));
+        if (currentShelfId === shelf.id) {
+          currentLinkedShelf = null;
           document.getElementById('opds-shelf-banner')?.classList.add('hidden');
           document.getElementById('page-title').innerHTML =
             `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(shelf.name)}`;
@@ -1747,40 +1819,68 @@ function _updateSyncDateDisplay(ts) {
   if (el) el.textContent = ts ? _formatSyncDate(ts) : '';
 }
 
+// Icon/label swap for the two link types the banner can show. Keeps the existing
+// #opds-shelf-banner / #opds-shelf-go-btn / #opds-shelf-sync-btn ids shared across both
+// (they were OPDS-only originally; the name is now historical, not literal).
+function updateShelfBannerForType(type) {
+  const goBtn = document.getElementById('opds-shelf-go-btn');
+  if (!goBtn) return;
+  if (type === 'bookorbit') {
+    goBtn.innerHTML = `<img src="/images/bookorbit.svg" class="nav-icon nav-icon-bookorbit" alt=""> <span>${t('library.bookorbit_go_folder')}</span>`;
+  } else {
+    goBtn.innerHTML = `<img src="/images/online_library.svg" class="nav-icon nav-icon-online-library" alt=""> <span data-i18n="library.opds_go_folder">${t('library.opds_go_folder')}</span>`;
+  }
+}
+
 function _autoSyncLinkedShelf(linked) {
   const now = Date.now();
   const last = _autoSyncCooldown.get(linked.shelfId) || 0;
   if (now - last < 60 * 60 * 1000) return; // one sync per shelf per hour
   _autoSyncCooldown.set(linked.shelfId, now);
 
-  const params = new URLSearchParams({
-    serverId:  String(linked.serverId),
-    folderUrl: linked.folderUrl,
-    shelfId:   String(linked.shelfId),
-    shelfName: linked.shelfName,
-    silent:    '1',
-    token:     getToken(),
-  });
-  const es = new EventSource(`/api/opds/sync-sse?${params}`);
+  const handleDone = (es, addedCount) => {
+    es.close();
+    const newBooks = addedCount || 0;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (currentShelfId === linked.shelfId) {
+      _updateSyncDateDisplay(nowSec);
+      if (newBooks > 0) {
+        reloadLibrary().catch(() => {});
+        reloadShelves().catch(() => {});
+      }
+    } else if (newBooks > 0) {
+      setShelfBadge(linked.shelfId, newBooks);
+    }
+  };
+
+  let es;
+  if (linked.type === 'bookorbit') {
+    const params = new URLSearchParams({
+      source:    linked.source,
+      id:        String(linked.id),
+      shelfId:   String(linked.shelfId),
+      shelfName: linked.shelfName,
+      silent:    '1',
+      token:     getToken(),
+    });
+    es = new EventSource(`/api/bookorbit/sync-sse?${params}`);
+  } else {
+    const params = new URLSearchParams({
+      serverId:  String(linked.serverId),
+      folderUrl: linked.folderUrl,
+      shelfId:   String(linked.shelfId),
+      shelfName: linked.shelfName,
+      silent:    '1',
+      token:     getToken(),
+    });
+    es = new EventSource(`/api/opds/sync-sse?${params}`);
+  }
+
   es.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'done') {
-        es.close();
-        const newBooks = msg.added || 0;
-        const nowSec = Math.floor(Date.now() / 1000);
-        if (currentShelfId === linked.shelfId) {
-          _updateSyncDateDisplay(nowSec);
-          if (newBooks > 0) {
-            reloadLibrary().catch(() => {});
-            reloadShelves().catch(() => {});
-          }
-        } else if (newBooks > 0) {
-          setShelfBadge(linked.shelfId, newBooks);
-        }
-      } else if (msg.type === 'error') {
-        es.close();
-      }
+      if (msg.type === 'done') handleDone(es, msg.added);
+      else if (msg.type === 'error') es.close();
     } catch { /* ignore parse errors */ }
   };
   es.onerror = () => es.close();
@@ -2107,6 +2207,36 @@ async function checkInterruptedSession() {
   });
 }
 
+// Grid density (compact/normal/large) — shared across every book-card grid in the app (main
+// library + BookOrbit) so the size picked in one place is exactly the size shown everywhere
+// else. Deliberately NOT inside initLibrary(): panels init lazily on first visit (router.js),
+// so a session that lands directly on the BookOrbit panel (deep link / restored history state)
+// would never run initLibrary() at all, leaving BookOrbit's own density buttons unwired. Called
+// once, unconditionally, from app.js's boot sequence instead.
+let _gridDensityInitialized = false;
+export function initGridDensityToggle() {
+  if (_gridDensityInitialized) return;
+  _gridDensityInitialized = true;
+
+  let gridDensity = localStorage.getItem('br_grid_density') || 'normal';
+  function applyGridDensity() {
+    document.querySelectorAll('#book-grid, #bookorbit-grid').forEach(grid => {
+      grid.classList.remove('density-compact', 'density-normal', 'density-large');
+      grid.classList.add('density-' + gridDensity);
+    });
+    document.querySelectorAll('.density-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.density === gridDensity));
+  }
+  applyGridDensity();
+  document.querySelectorAll('.density-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      gridDensity = btn.dataset.density;
+      localStorage.setItem('br_grid_density', gridDensity);
+      applyGridDensity();
+    });
+  });
+}
+
 export async function initLibrary() {
   if (_initialized) return;
   _initialized = true;
@@ -2116,7 +2246,11 @@ export async function initLibrary() {
   window.addEventListener('offline', () => loadBooks().catch(() => {}));
 
   // Whether to show the info modal's "Related" (BookOrbit recommendations) tab.
-  apiFetch('/settings').then(s => { bookorbitEnabled = !!s.bookorbit_sync_enabled; }).catch(() => {});
+  apiFetch('/settings').then(s => {
+    bookorbitEnabled = !!s.bookorbit_sync_enabled;
+    bookorbitUrl = s.bookorbit_url || '';
+    setBookorbitNavVisible(bookorbitEnabled);
+  }).catch(() => {});
 
   // SW download progress messages
   if (isOfflineSupported) {
@@ -2148,30 +2282,11 @@ export async function initLibrary() {
     if (sortSelect && Array.from(sortSelect.options).some(o => o.value === savedSort))
       sortSelect.value = savedSort;
   }
-  initSortMenu();
+  initSortMenuFor('sort-select', 'sort-menu-btn', 'sort-menu-label', 'sort-menu-list');
   document.getElementById('sort-select').addEventListener('change', () => {
     if (sortBeforeSeriesFilter === null)
       localStorage.setItem('library-sort', document.getElementById('sort-select').value);
     applyFilter();
-  });
-
-  // Grid density
-  let gridDensity = localStorage.getItem('br_grid_density') || 'normal';
-  function applyGridDensity() {
-    const grid = document.getElementById('book-grid');
-    if (!grid) return;
-    grid.classList.remove('density-compact', 'density-normal', 'density-large');
-    grid.classList.add('density-' + gridDensity);
-    document.querySelectorAll('.density-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.density === gridDensity));
-  }
-  applyGridDensity();
-  document.querySelectorAll('.density-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      gridDensity = btn.dataset.density;
-      localStorage.setItem('br_grid_density', gridDensity);
-      applyGridDensity();
-    });
   });
 
   // Edit mode
@@ -2304,14 +2419,23 @@ export async function initLibrary() {
     showPanel('opds');
   });
 
-  // OPDS-linked shelf banner buttons
+  // Linked shelf banner buttons — shared between OPDS- and BookOrbit-linked shelves
+  // (see currentLinkedShelf.type; ids/classes are named "opds-*" for historical reasons only).
   document.getElementById('opds-shelf-go-btn')?.addEventListener('click', () => {
-    if (!currentLinkedOpds) return;
-    openOpdsBrowserAtFolder(currentLinkedOpds.serverId, currentLinkedOpds.folderUrl);
+    if (!currentLinkedShelf) return;
+    if (currentLinkedShelf.type === 'bookorbit') {
+      openBookorbitBrowserAt(currentLinkedShelf.source, currentLinkedShelf.id, currentLinkedShelf.shelfName);
+    } else {
+      openOpdsBrowserAtFolder(currentLinkedShelf.serverId, currentLinkedShelf.folderUrl);
+    }
   });
   document.getElementById('opds-shelf-sync-btn')?.addEventListener('click', () => {
-    if (!currentLinkedOpds) return;
-    openSyncModal(currentLinkedOpds.folderUrl, currentLinkedOpds.shelfName, currentLinkedOpds.shelfId, currentLinkedOpds.serverId);
+    if (!currentLinkedShelf) return;
+    if (currentLinkedShelf.type === 'bookorbit') {
+      openBookorbitSyncModal(currentLinkedShelf.source, currentLinkedShelf.id, currentLinkedShelf.shelfName, currentLinkedShelf.shelfId);
+    } else {
+      openSyncModal(currentLinkedShelf.folderUrl, currentLinkedShelf.shelfName, currentLinkedShelf.shelfId, currentLinkedShelf.serverId);
+    }
   });
   document.getElementById('empty-upload-btn').addEventListener('click', showDropZone);
   // The visible content is wrapped in a <label for="file-input">, so tapping it
@@ -2348,6 +2472,23 @@ export async function initLibrary() {
   checkInterruptedSession();
 }
 
+// Custom sort-menu list items are plain DOM built once at init time (not a live binding to the
+// <select>'s options), so a language switch needs to manually re-copy each option's freshly
+// re-translated text into its corresponding menu item + the button label. Exported so both the
+// main library grid and BookOrbit's own sort menu can reuse it (see initSortMenuFor above).
+export function resyncSortMenu(selectId, listId, labelId) {
+  const select = document.getElementById(selectId);
+  const menuItems = document.querySelectorAll(`#${listId} .sort-menu-option`);
+  if (select && menuItems.length) {
+    Array.from(select.options).forEach((opt, i) => {
+      const item = menuItems[i];
+      if (item) item.querySelector('span')?.replaceWith(Object.assign(document.createElement('span'), { textContent: opt.textContent }));
+    });
+  }
+  const label = document.getElementById(labelId);
+  if (label && select) label.textContent = select.options[select.selectedIndex]?.textContent || '';
+}
+
 // Re-render language-dependent content when language changes
 document.addEventListener('langchange', () => {
   if (!_initialized) return;
@@ -2356,18 +2497,7 @@ document.addEventListener('langchange', () => {
     const v = t(opt.dataset.i18n);
     if (v) opt.textContent = v;
   });
-  // Sync the visible custom sort-menu list items from the updated <option> text
-  const select = document.getElementById('sort-select');
-  const menuItems = document.querySelectorAll('#sort-menu-list .sort-menu-option');
-  if (select && menuItems.length) {
-    Array.from(select.options).forEach((opt, i) => {
-      const item = menuItems[i];
-      if (item) item.querySelector('span')?.replaceWith(Object.assign(document.createElement('span'), { textContent: opt.textContent }));
-    });
-    // Update the visible button label to match the selected option
-    const label = document.getElementById('sort-menu-label');
-    if (label) label.textContent = select.options[select.selectedIndex]?.textContent || '';
-  }
+  resyncSortMenu('sort-select', 'sort-menu-list', 'sort-menu-label');
   const titleEl = document.getElementById('page-title');
   if (titleEl) {
     if (currentShelfId === 'all') titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;

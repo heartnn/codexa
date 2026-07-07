@@ -1492,6 +1492,13 @@ html.no-flexgap .spread-buttons.page-anim-grid > * + * { margin-left: 0; }
   color: #000;
   border-color: #000;
 }
+[data-reader-eink] .btn-primary {
+  background: #000;
+  color: #fff;
+}
+[data-reader-eink] .btn-primary:hover { opacity: .75; }
+/* Book-finished overlay: no colored accent, no colored emoji glyph */
+[data-reader-eink] .book-finished-icon { filter: grayscale(100%); }
 [data-reader-eink] .sb-item-row {
   background: #fff;
   border-color: #000;

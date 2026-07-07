@@ -225,7 +225,17 @@
     <main id="panel-settings" class="app-panel app-main" hidden>
       <div class="page-header"><h1><img src="/images/settings.svg" class="nav-icon nav-icon-settings" alt=""> <span data-i18n="settings.page_title">Nastavitve</span></h1></div>
 
+      <div class="settings-tabs" role="tablist">
+        <button class="settings-tab active" data-tab="general" data-i18n="settings.tab_general">Splošno</button>
+        <button class="settings-tab" data-tab="kosync" data-i18n="settings.tab_kosync">KOReader Sync</button>
+        <button class="settings-tab" data-tab="bookorbit" data-i18n="settings.tab_bookorbit">BookOrbit</button>
+        <button class="settings-tab" data-tab="opds" data-i18n="settings.tab_opds">OPDS</button>
+        <button class="settings-tab" data-tab="dict" data-i18n="settings.tab_dict">Slovarji</button>
+        <button class="settings-tab" data-tab="admin" id="settings-tab-admin" hidden data-i18n="settings.tab_admin">Admin</button>
+      </div>
+
       <!-- General settings -->
+      <div class="settings-tab-panel" data-tab-panel="general">
       <div class="settings-card">
         <h2 data-i18n="settings.general_title">Splošno</h2>
         <div class="setting-toggle-row">
@@ -254,8 +264,10 @@
           <button id="btn-change-pw" class="btn btn-primary btn-sm" data-i18n="settings.change_pw_btn">Spremeni geslo</button>
         </div>
       </div>
+      </div>
 
       <!-- KOReader sync section -->
+      <div class="settings-tab-panel" data-tab-panel="kosync" hidden>
       <div class="settings-card">
         <h2 data-i18n="settings.kosync_title">Sinhronizacija KOReader</h2>
         <div class="kosync-info-box" data-i18n-html="settings.kosync_info_html"></div>
@@ -296,6 +308,20 @@
         <div class="card-actions" style="margin-top:.5rem">
           <button id="btn-save-internal" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
         </div>
+      </div>
+      </div>
+
+      <!-- BookOrbit extended sync (standalone — no relation to KOReader Sync above; BookOrbit
+           pushes progress via its own web API regardless, and this adds highlights/reading log/
+           status+rating sync plus the native library browser). -->
+      <div class="settings-tab-panel" data-tab-panel="bookorbit" hidden>
+      <div class="settings-card">
+        <h2 data-i18n="settings.tab_bookorbit">BookOrbit</h2>
+        <div id="bookorbit-status" class="kosync-status"></div>
+        <div class="form-group">
+          <label for="bookorbit-url" data-i18n="settings.bookorbit_url_label">Naslov BookOrbit strežnika</label>
+          <input type="url" id="bookorbit-url" data-i18n-placeholder="settings.bookorbit_url_ph" placeholder="https://bookorbit.domena.si" autocomplete="off" />
+        </div>
         <hr class="section-divider">
         <div style="display:flex;align-items:flex-start;gap:.85rem;margin-bottom:.75rem">
           <label class="toggle" style="flex-shrink:0;margin-top:.15rem">
@@ -318,10 +344,13 @@
         </div>
         <div class="card-actions" style="margin-top:.5rem">
           <button id="btn-save-bookorbit" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
+          <button id="btn-test-bookorbit" class="btn btn-secondary btn-sm" data-i18n="settings.btn_test_kosync">Testiraj povezavo</button>
         </div>
+      </div>
       </div>
 
       <!-- OPDS servers -->
+      <div class="settings-tab-panel" data-tab-panel="opds" hidden>
       <div class="settings-card">
         <h2 data-i18n="settings.opds_title">OPDS strežniki</h2>
         <div id="opds-server-list" style="margin-bottom:1rem"></div>
@@ -352,15 +381,19 @@
           </div>
         </details>
       </div>
+      </div>
 
       <!-- Dictionary preferences (all users) -->
+      <div class="settings-tab-panel" data-tab-panel="dict" hidden>
       <div class="settings-card" id="dict-prefs-card">
         <h2 data-i18n="settings.dict_prefs_title">Dictionaries</h2>
         <div class="settings-hint" data-i18n="settings.dict_prefs_hint">Set source/target language and search order. Changes apply immediately in the reader.</div>
         <div id="settings-dict-list"></div>
       </div>
+      </div>
 
       <!-- Admin section (shown only to admin) -->
+      <div class="settings-tab-panel" data-tab-panel="admin" hidden>
       <div class="settings-card" id="admin-card" hidden>
         <h2><span data-i18n="settings.admin_title">Administracija</span> <span class="badge" data-i18n="settings.admin_badge">Admin</span></h2>
         <div style="display:flex;align-items:flex-start;gap:.85rem;margin-bottom:.75rem">
@@ -400,6 +433,7 @@
           <span data-i18n="reader.upload_dict">Upload dictionary ZIP…</span>
           <input type="file" id="admin-dict-upload" accept=".zip" multiple class="file-input-offscreen">
         </label>
+      </div>
       </div>
 
     </main>
@@ -444,6 +478,78 @@
           </div>
           <p id="catalog-empty" hidden data-i18n="opds.no_results">Ni zadetkov.</p>
           <div id="opds-pagination" hidden></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Panel: BookOrbit browser ───────────────────────────────────────── -->
+    <div id="panel-bookorbit" class="app-panel" hidden>
+      <div class="opds-layout">
+
+        <!-- Left pane: browse sections. On mobile this becomes an off-canvas drawer
+             (see #bookorbit-drawer-toggle / #bookorbit-drawer-overlay) instead of
+             permanently stacking above the book grid. -->
+        <aside class="opds-sidebar" id="bookorbit-sidebar">
+          <div class="opds-sidebar-header">
+            <span data-i18n="bookorbit.nav_title">BookOrbit</span>
+            <button id="bookorbit-drawer-close" class="bookorbit-drawer-close-btn" data-i18n-aria-label="common.close" aria-label="Zapri">&times;</button>
+          </div>
+          <nav class="bookorbit-nav">
+            <button class="bookorbit-nav-item" data-section="libraries" data-i18n="bookorbit.nav_libraries">Libraries</button>
+            <button class="bookorbit-nav-item" data-section="smartScopes" data-i18n="bookorbit.nav_smart_scopes">Smart Scopes</button>
+            <button class="bookorbit-nav-item" data-section="collections" data-i18n="bookorbit.nav_collections">Collections</button>
+            <button class="bookorbit-nav-item" data-section="series" data-i18n="bookorbit.nav_series">Series</button>
+            <button class="bookorbit-nav-item" data-section="authors" data-i18n="bookorbit.nav_authors">Authors</button>
+            <button class="bookorbit-nav-item" data-section="search" data-i18n="bookorbit.nav_search">Book Search</button>
+          </nav>
+          <div id="bookorbit-sublist"></div>
+        </aside>
+        <div id="bookorbit-drawer-overlay"></div>
+
+        <!-- Right pane: book grid -->
+        <div class="opds-catalog" style="position:relative">
+          <div class="opds-toolbar">
+            <button id="bookorbit-drawer-toggle" class="bookorbit-drawer-toggle-btn" data-i18n-aria-label="bookorbit.drawer_toggle" aria-label="Brskaj" data-i18n-title="bookorbit.drawer_toggle" title="Brskaj">☰</button>
+            <span id="bookorbit-title"></span>
+            <div class="density-toggle" role="group" aria-label="Grid density">
+              <button class="density-btn" data-density="compact" data-i18n-title="library.density_compact" title="Kompaktno"><img src="/images/density_compact.svg" class="nav-icon nav-icon-density-compact" alt=""></button>
+              <button class="density-btn" data-density="normal"  data-i18n-title="library.density_normal"  title="Normalno"><img src="/images/density_normal.svg"  class="nav-icon nav-icon-density-normal"  alt=""></button>
+              <button class="density-btn" data-density="large"   data-i18n-title="library.density_large"   title="Veliko"><img src="/images/density_large.svg"   class="nav-icon nav-icon-density-large"   alt=""></button>
+            </div>
+            <div class="sort-menu-wrap bookorbit-sort-menu-wrap">
+              <select id="bookorbit-sort-select" class="sort-select hidden" aria-hidden="true" tabindex="-1">
+                <option value="added_desc"  data-i18n="bookorbit.sort_added_desc">Recently added</option>
+                <option value="added_asc"   data-i18n="bookorbit.sort_added_asc">Oldest added</option>
+                <option value="title_asc"   data-i18n="bookorbit.sort_title_asc">Title A–Z</option>
+                <option value="title_desc"  data-i18n="bookorbit.sort_title_desc">Title Z–A</option>
+                <option value="author_asc"  data-i18n="bookorbit.sort_author_asc">Author A–Z</option>
+                <option value="series_asc"  data-i18n="bookorbit.sort_series">Series order</option>
+                <option value="random"      data-i18n="bookorbit.sort_random">Random</option>
+              </select>
+              <button id="bookorbit-sort-menu-btn" class="sort-menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="bookorbit-sort-menu-list" data-i18n-title="bookorbit.sort_btn_title" title="Sort">
+                <span id="bookorbit-sort-menu-label">Recently added</span>
+                <span class="sort-menu-caret">▾</span>
+              </button>
+              <div id="bookorbit-sort-menu-list" class="sort-menu-list hidden" role="listbox" data-i18n-aria-label="bookorbit.sort_btn_title" aria-label="Sort"></div>
+            </div>
+          </div>
+          <div class="opds-search-row" id="bookorbit-search-row" hidden>
+            <input type="search" id="bookorbit-search-input" data-i18n-placeholder="bookorbit.search_ph" placeholder="Search title or author…" />
+            <button id="btn-bookorbit-search" class="btn btn-primary btn-sm" data-i18n="opds.btn_search">Išči</button>
+          </div>
+          <div id="bookorbit-loading" hidden>
+            <span class="spinner"></span>
+            <span style="display:block;margin-top:.5rem;font-size:.85rem" data-i18n="opds.loading">Nalagam…</span>
+          </div>
+          <div id="bookorbit-grid" class="bookorbit-grid book-grid">
+            <div class="opds-welcome" style="grid-column:1/-1">
+              <span class="icon">📚</span>
+              <span data-i18n="bookorbit.welcome">Select a section on the left to browse your BookOrbit library</span>
+            </div>
+          </div>
+          <p id="bookorbit-empty" hidden data-i18n="bookorbit.no_results">No books found.</p>
+          <div id="bookorbit-pagination" hidden></div>
         </div>
 
       </div>

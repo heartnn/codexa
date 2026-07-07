@@ -1,4 +1,4 @@
-const PANELS = ['library', 'settings', 'opds'];
+const PANELS = ['library', 'settings', 'opds', 'bookorbit'];
 const _inits  = {};
 let _current  = null;
 
@@ -12,8 +12,11 @@ export async function showPanel(name, pushState = true) {
     if (el) el.hidden = (p !== name);
   });
 
-  // Drive body class for OPDS overflow behaviour
-  document.querySelector('.app-body')?.classList.toggle('opds-active', name === 'opds');
+  // Drive body class for OPDS/BookOrbit overflow behaviour (both panels are flex-layout,
+  // internally-scrolling catalogs rather than the normal scrolling page body).
+  const bodyEl = document.querySelector('.app-body');
+  bodyEl?.classList.toggle('opds-active', name === 'opds');
+  bodyEl?.classList.toggle('bookorbit-active', name === 'bookorbit');
 
   _current = name;
 

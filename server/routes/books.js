@@ -6,6 +6,7 @@ const { getDb, DATA_DIR }              = require('../db');
 const { authenticateToken }            = require('../middleware/auth');
 const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
 const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
+const { PEEK_TTL_SECONDS, peekFilePath, deletePeekRow } = require('../utils/peekCleanup');
 const bookorbit = require('../services/bookorbitSync');
 
 // Aligned with BookOrbit's ReadStatus vocabulary so values sync 1:1.
@@ -50,7 +51,7 @@ router.get('/', (req, res) => {
       FROM books b
       LEFT JOIN reading_progress p
              ON p.user_id = b.user_id AND p.document_hash = b.file_hash
-     WHERE b.user_id = ?
+     WHERE b.user_id = ? AND b.peek_expires_at IS NULL
      ORDER BY b.added_at DESC
   `).all(req.user.id);
   res.json(books);
@@ -59,10 +60,13 @@ router.get('/', (req, res) => {
 // ── POST /api/books/:id/opened — record that the user opened this book ─────────
 router.post('/:id/opened', (req, res) => {
   const db   = getDb();
-  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  const book = db.prepare('SELECT id, peek_expires_at FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' });
   db.prepare(`UPDATE books SET last_opened_at = strftime('%s', 'now') WHERE id = ?`).run(book.id);
-  bookorbit.triggerSync(req.user.id, book.id); // pull BookOrbit changes + push pending local
+  // Ephemeral peek rows are never mapped into BookOrbit (no bookorbit_sync_state row, no
+  // file_hash_md5 — see createBookOrbitPeek in server/routes/bookorbit.js), so a sync attempt can
+  // only ever resolve to "not in your BookOrbit library" — skip it instead of logging noise.
+  if (!book.peek_expires_at) bookorbit.triggerSync(req.user.id, book.id); // pull BookOrbit changes + push pending local
   res.json({ success: true });
 });
 
@@ -115,6 +119,11 @@ router.get('/:id', (req, res) => {
     }
   }
 
+  // BookOrbit book id, if this book is mapped — lets the client build a deep link to the book
+  // on the BookOrbit server (bookorbit_url from GET /api/settings + /book/:bo_book_id).
+  const boState = db.prepare('SELECT bo_book_id FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(req.user.id, book.id);
+  book.bo_book_id = boState?.bo_book_id ?? null;
+
   res.json(book);
 });
 
@@ -126,9 +135,19 @@ router.get('/:id/file', (req, res) => {
   ).get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
-  const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
+  const filePath = book.peek_expires_at
+    ? peekFilePath(req.user.id, book.filename)
+    : path.join(BOOKS_DIR, String(req.user.id), book.filename);
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'error.book_file_not_found' });
+  }
+
+  // Reopened peek link — push the expiry back out so an active-but-idle reread doesn't get
+  // swept mid-session (light second line of defense; the main guarantee is the reader's own
+  // close signal / the background sweep in server/index.js).
+  if (book.peek_expires_at) {
+    db.prepare('UPDATE books SET peek_expires_at = ? WHERE id = ?')
+      .run(Math.floor(Date.now() / 1000) + PEEK_TTL_SECONDS, book.id);
   }
 
   const isCbzFile = book.filename?.endsWith('.cbz') || book.format === 'cbz';
@@ -237,10 +256,17 @@ router.patch('/:id', (req, res) => {
   res.json({ success: true, kosync_hash: h });
 });
 
-// ── PATCH /api/books/:id/file — download epub from OPDS and replace local file ──
+// ── PATCH /api/books/:id/file — replace local file with a fresh copy from OPDS or BookOrbit ──
+// Two request shapes: { href, serverId } for an OPDS acquisition link (Basic-auth fetch), or
+// { source:'bookorbit', boBookId, fileId } for a BookOrbit file (Bearer-token fetch via the
+// existing bookorbitSync service — see server/routes/bookorbit.js's import/peek routes for the
+// same fetch pattern). Both converge on the same hash/move/re-extract-metadata flow below.
 router.patch('/:id/file', async (req, res) => {
-  const { href, serverId } = req.body;
-  if (!href || serverId === undefined) {
+  const { href, serverId, source, boBookId, fileId, format } = req.body || {};
+  const isBookorbit = source === 'bookorbit';
+  if (isBookorbit) {
+    if (!fileId) return res.status(400).json({ error: 'error.missing_fields' });
+  } else if (!href || serverId === undefined) {
     return res.status(400).json({ error: 'error.missing_fields' });
   }
 
@@ -248,53 +274,77 @@ router.patch('/:id/file', async (req, res) => {
   const book = db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
-  // Retrieve OPDS server credentials from user settings
-  const settingsRow = db.prepare('SELECT opds_servers FROM user_settings WHERE user_id = ?').get(req.user.id);
-  let servers = [];
-  try { servers = JSON.parse(settingsRow?.opds_servers || '[]'); } catch { servers = []; }
-  const idx = parseInt(serverId, 10);
-  const server = (!isNaN(idx) && idx >= 0 && idx < servers.length) ? servers[idx] : null;
-  if (!server) return res.status(400).json({ error: 'error.opds_server_not_found' });
-
-  const headers = { Accept: 'application/epub+zip, */*' };
-  if (server.username) {
-    const creds = Buffer.from(`${server.username}:${server.password || ''}`).toString('base64');
-    headers['Authorization'] = `Basic ${creds}`;
+  let server = null;
+  if (!isBookorbit) {
+    // Retrieve OPDS server credentials from user settings
+    const settingsRow = db.prepare('SELECT opds_servers FROM user_settings WHERE user_id = ?').get(req.user.id);
+    let servers = [];
+    try { servers = JSON.parse(settingsRow?.opds_servers || '[]'); } catch { servers = []; }
+    const idx = parseInt(serverId, 10);
+    server = (!isNaN(idx) && idx >= 0 && idx < servers.length) ? servers[idx] : null;
+    if (!server) return res.status(400).json({ error: 'error.opds_server_not_found' });
   }
 
-  const tmpPath = path.join(TMP_DIR, `replace-${Date.now()}-${Math.random().toString(36).slice(2)}.epub`);
+  const tmpPath = path.join(TMP_DIR, `replace-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
   let fileHandle;
+  // The new file's format — preserved from the book being replaced for OPDS (which only ever
+  // fetches epub); for BookOrbit, CBR gets normalized to CBZ the same way import/peek do.
+  let outFormat = book.filename?.endsWith('.cbz') || book.format === 'cbz' ? 'cbz' : 'epub';
   try {
-    const r = await fetch(href, { headers, signal: AbortSignal.timeout(120000) });
-    if (!r.ok) return res.status(502).json({ error: `error.opds_download_failed_${r.status}` });
-    const ct = r.headers.get('content-type') || '';
-    if (!ct.includes('epub') && !ct.includes('octet-stream')) {
-      return res.status(502).json({ error: 'error.opds_not_epub' });
-    }
+    if (isBookorbit) {
+      const ctx = bookorbit.getContext(req.user.id);
+      if (!ctx) return res.status(403).json({ error: 'error.bookorbit_not_enabled' });
+      const asset = await bookorbit.fetchAsset(req.user.id, ctx, `/books/files/${fileId}/download`);
+      if (!asset.ok) return res.status(502).json({ error: 'error.bookorbit_unreachable' });
+      let workBuf = asset.buffer;
+      if (!workBuf || workBuf.length < 100) return res.status(502).json({ error: 'error.file_empty' });
+      if (isCbrBuffer(workBuf)) { workBuf = await convertCbrToCbz(workBuf); outFormat = 'cbz'; }
+      else if (String(format || '').toLowerCase() === 'cbz') { outFormat = 'cbz'; }
+      fs.writeFileSync(tmpPath, workBuf);
+    } else {
+      const headers = { Accept: 'application/epub+zip, */*' };
+      if (server.username) {
+        const creds = Buffer.from(`${server.username}:${server.password || ''}`).toString('base64');
+        headers['Authorization'] = `Basic ${creds}`;
+      }
+      const r = await fetch(href, { headers, signal: AbortSignal.timeout(120000) });
+      if (!r.ok) return res.status(502).json({ error: `error.opds_download_failed_${r.status}` });
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('epub') && !ct.includes('octet-stream')) {
+        return res.status(502).json({ error: 'error.opds_not_epub' });
+      }
 
-    // Stream to temp file
-    fileHandle = fs.createWriteStream(tmpPath);
-    const reader = r.body.getReader();
-    await new Promise((resolve, reject) => {
-      fileHandle.on('error', reject);
-      const pump = () => reader.read().then(({ done, value }) => {
-        if (done) { fileHandle.end(); return; }
-        if (!fileHandle.write(value)) fileHandle.once('drain', pump);
-        else pump();
-      }).catch(reject);
-      fileHandle.once('finish', resolve);
-      pump();
-    });
+      // Stream to temp file
+      fileHandle = fs.createWriteStream(tmpPath);
+      const reader = r.body.getReader();
+      await new Promise((resolve, reject) => {
+        fileHandle.on('error', reject);
+        const pump = () => reader.read().then(({ done, value }) => {
+          if (done) { fileHandle.end(); return; }
+          if (!fileHandle.write(value)) fileHandle.once('drain', pump);
+          else pump();
+        }).catch(reject);
+        fileHandle.once('finish', resolve);
+        pump();
+      });
+    }
 
     const newMd5 = computeFileMd5(tmpPath);
     const destDir = path.join(BOOKS_DIR, String(req.user.id));
     if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-    const destPath = path.join(destDir, book.file_hash + '.epub');
+    // Reuse the book's existing filename (already "<file_hash>.<ext>") rather than hardcoding
+    // .epub — keeps this correct for CBZ books too, and for a BookOrbit replace whose format
+    // matches what's already stored.
+    const destPath = path.join(destDir, book.filename);
     fs.renameSync(tmpPath, destPath);
+
+    if (isBookorbit && boBookId) bookorbit.mapLocalBook(req.user.id, book.id, Number(boBookId), Number(fileId));
 
     // Re-extract all metadata from the new file so genres, description, etc. stay current.
     // Title and author are intentionally preserved in case the user edited them manually.
-    const meta = extractEpubMetadata(destPath, COVERS_DIR, book.file_hash);
+    const meta = outFormat === 'cbz'
+      ? extractCbzMetadata(destPath, COVERS_DIR, book.file_hash)
+      : extractEpubMetadata(destPath, COVERS_DIR, book.file_hash);
     db.prepare(`UPDATE books SET
       file_hash_md5 = ?, kosync_hash = '',
       cover_path  = ?,
@@ -405,6 +455,19 @@ router.get('/bookorbit-cover/:boBookId', async (req, res) => {
   } catch {
     res.status(404).end();
   }
+});
+
+// ── POST /api/books/:id/peek-cleanup — reader's close-signal for an ephemeral peek book ────────
+// Fired (best-effort, keepalive) from reader_v4.js's beforeunload handler. Safe to call
+// unconditionally: no-ops on a missing or non-ephemeral row, so stale client state can never
+// delete a real book. The actual guarantee against a forced close/crash is the background sweep
+// (server/index.js), not this route.
+router.post('/:id/peek-cleanup', (req, res) => {
+  const db   = getDb();
+  const book = db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!book || !book.peek_expires_at) return res.status(204).end();
+  deletePeekRow(db, book);
+  res.status(204).end();
 });
 
 // ── DELETE /api/books/:id ─────────────────────────────────────────────────────

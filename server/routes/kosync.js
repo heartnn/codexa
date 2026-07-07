@@ -20,6 +20,8 @@ const bcrypt  = require('bcrypt');
 const crypto  = require('crypto');
 const { getDb }             = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { maybeMarkBookFinished } = require('../utils/bookCompletion');
+const bookorbit             = require('../services/bookorbitSync');
 
 // ── Basic Auth helper ─────────────────────────────────────────────────────────
 function parseBasicAuth(req) {
@@ -126,6 +128,8 @@ kosyncRouter.put('/syncs/progress', async (req, res) => {
                           THEN excluded.updated_at ELSE reading_progress.updated_at END
   `).run(user.id, String(document).slice(0, 255), String(progress), pct, dev);
 
+  maybeMarkBookFinished(user.id, String(document).slice(0, 255));
+
   res.json({ document, progress, percentage: pct, device: dev });
 });
 
@@ -168,6 +172,17 @@ function isInternalEnabled(userId) {
   const db = getDb();
   const s  = db.prepare('SELECT kosync_internal_enabled FROM user_settings WHERE user_id = ?').get(userId);
   return s?.kosync_internal_enabled === 1;
+}
+
+// KOReader/KOSync identifies books by a document hash that may be the user-supplied
+// kosync_hash, the computed MD5, or (fallback) the SHA-256 file_hash — match any of them
+// to find the local book row for a BookOrbit progress push.
+function findBookIdForDocument(userId, document) {
+  const db  = getDb();
+  const row = db.prepare(
+    'SELECT id FROM books WHERE user_id = ? AND (kosync_hash = ? OR file_hash_md5 = ? OR file_hash = ?)'
+  ).get(userId, document, document, document);
+  return row?.id ?? null;
 }
 
 // KOReader kosync protocol uses custom headers, NOT HTTP Basic Auth.
@@ -283,10 +298,19 @@ proxyRouter.get('/internal/:document', (req, res) => {
 // Used so KOReader devices picking up from this server get the web reader's position.
 // Pass ?force=1 to unconditionally overwrite (e.g. user confirmed a backwards sync).
 proxyRouter.put('/internal/:document', (req, res) => {
-  if (!isInternalEnabled(req.user.id)) return res.json({ skipped: true });
   const { progress, percentage, device } = req.body;
-  const forceOverwrite = req.query.force === '1';
   const pct = typeof percentage === 'number' ? percentage : parseFloat(percentage) || 0;
+
+  // This endpoint is hit at every genuine KOSync push point (chapter boundary, manual
+  // push, close) regardless of whether the internal KOReader-sync-server feature below
+  // is enabled — so it's also the right place to mirror progress into BookOrbit.
+  if (bookorbit.isEnabled(req.user.id)) {
+    const bookId = findBookIdForDocument(req.user.id, req.params.document);
+    if (bookId != null) bookorbit.triggerProgressPush(req.user.id, bookId, pct);
+  }
+
+  if (!isInternalEnabled(req.user.id)) return res.json({ skipped: true });
+  const forceOverwrite = req.query.force === '1';
   const dev = String(device || 'web').slice(0, 64);
   const db  = getDb();
   if (forceOverwrite) {
@@ -314,6 +338,7 @@ proxyRouter.put('/internal/:document', (req, res) => {
                             THEN excluded.updated_at ELSE reading_progress.updated_at END
     `).run(req.user.id, req.params.document, String(progress || ''), pct, dev);
   }
+  maybeMarkBookFinished(req.user.id, req.params.document);
   res.json({ pushed: true });
 });
 

@@ -1,7 +1,7 @@
 ﻿import { apiFetch, requireAuth, getToken } from './api.js';
 import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
-import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
+import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta, removeBook } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
 import { log, warn } from './logger.js';
 
@@ -34,7 +34,11 @@ if (!requireAuth()) throw new Error('not authenticated');
 const params = new URLSearchParams(window.location.search);
 const isPeekMode = params.get('peek') === '1';
 const bookId = params.get('id');
-if (!bookId) { window.location.href = '/'; throw new Error(); }
+// Peeking from the BookOrbit panel (public/js/bookorbit.js) tags the reader URL so closing sends
+// the user back to that panel (which restores its own last section/item/page/sort — see
+// bookorbit.js's saveResumeState/restoreResumeState) instead of the default library view.
+const libraryReturnUrl = params.get('from') === 'bookorbit' ? '/?panel=bookorbit' : '/';
+if (!bookId) { window.location.href = libraryReturnUrl; throw new Error(); }
 const BIONIC_RELOAD_KEY = 'br_bionic_reload_state_v1';
 const SESSION_KEY = 'br_interrupted_session_v1';
 const RESUME_STATE_KEY = 'br_resume_state_v1';
@@ -294,6 +298,7 @@ let currentSpineIndex = 0;  // 0-based spine item index, used to generate KORead
 let lastKnownXPointer = null; // precise xpointer last received from KOReader/server (e.g. /body/DocFragment[5]/body/div/p[21]/text().0)
 let lastChapterHref = null;  // chapter-boundary save tracking
 let lastSentChapterHref = null; // last chapter for which remote progress was pushed
+let _finishedMessageShown = false; // "you've finished this book" overlay — once per page load
 let availableDicts  = null;  // cached GET /api/dictionary response
 let _batteryMgr     = null;  // BatteryManager from navigator.getBattery(), null if unsupported
 let _isOnline       = navigator.onLine; // kept in sync by online/offline events
@@ -365,6 +370,7 @@ let lastSyncedCfi      = '';           // CFI at last successful remote push —
 let bestKnownRemotePct = 0;            // high-water mark from all sources — kosync is never pushed below this
 let _kosyncPushFailures    = 0;        // consecutive remote push failures for current book
 let _kosyncWarnedThisSession = false;  // only warn once per book load
+let _bookorbitWarnedThisSession = false; // only warn once per book load (automatic pushes)
 
 // ── Status bar state ──────────────────────────────────────────────────────────
 let currentHref      = '';    // current spine href (updated from the cx-relocated event)
@@ -478,6 +484,15 @@ function loadBookPrefs(bookId) {
   try {
     const all = JSON.parse(localStorage.getItem('br_book_prefs') || '{}');
     const saved = all[bookId] || {};
+    // dictionaries (the ENABLED set) must default to "[] = unconfigured" per book (so the
+    // book-language-based default in renderDictSettings/showDictPopup kicks in), NOT carry over
+    // whatever the previously-read book left in `prefs` — persistPrefs() always dumps the
+    // CURRENT prefs (including per-book values) into the global br_reader_prefs blob, so without
+    // this reset a book with no override of its own silently inherits the last book's explicit
+    // dictionary selection instead of getting its own language-matched default. dictionaryOrder
+    // (just the display order of the dict list, not language-specific) intentionally keeps
+    // carrying over globally, same as other PER_BOOK_KEYS like fontSize/theme.
+    prefs.dictionaries = DEFAULT_PREFS.dictionaries;
     PER_BOOK_KEYS.forEach(k => { if (k in saved) prefs[k] = saved[k]; });
   } catch { /* ignore */ }
   updateBookPrefsIndicator();
@@ -3033,7 +3048,7 @@ async function returnToLibrary() {
   }
   // Unlock orientation when leaving reader
   if (prefs.lockPortrait) void applyPortraitLock(false);
-  window.location.href = '/';
+  window.location.href = libraryReturnUrl;
 }
 
 function isFullscreenActive() {
@@ -3288,13 +3303,18 @@ async function renderDictSettings() {
     apiFetch('/settings').then(s => {
       const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
       if (sp.dictionaryMeta) prefs.dictionaryMeta = sp.dictionaryMeta;
-      // Restore dict selection/order from server when local prefs are at default values
-      // (both empty arrays = fresh localStorage; prefs.dictionaries===null means "all disabled" and is intentional)
-      const _localAtDefault = Array.isArray(prefs.dictionaries) && prefs.dictionaries.length === 0
-                            && Array.isArray(prefs.dictionaryOrder) && prefs.dictionaryOrder.length === 0;
-      if (_localAtDefault) {
-        if (sp.dictionaryOrder?.length) prefs.dictionaryOrder = sp.dictionaryOrder;
-        if (sp.dictionaries !== undefined) prefs.dictionaries = sp.dictionaries;
+      // dictionaryOrder (just display order, not language-specific) always syncs from server —
+      // same as other global-ish prefs.
+      if (sp.dictionaryOrder?.length) prefs.dictionaryOrder = sp.dictionaryOrder;
+      // dictionaries (the ENABLED set), by contrast, is only restored from the server on a
+      // genuinely fresh browser (no br_reader_prefs at all — matches the same gate used for this
+      // exact purpose in init()). It being [] is now the NORMAL per-book "unconfigured, use the
+      // book-language default" state (see loadBookPrefs()) for any book without its own
+      // override — that must NOT be treated as "fresh install", or every unconfigured book would
+      // silently inherit whatever dictionaries were last explicitly saved server-side for a
+      // completely different book — the same bug loadBookPrefs() fixes for localStorage.
+      if (!localStorage.getItem('br_reader_prefs') && sp.dictionaries !== undefined) {
+        prefs.dictionaries = sp.dictionaries;
       }
     }).catch(() => {}),
   ]);
@@ -3311,8 +3331,18 @@ async function renderDictSettings() {
   const savedOrder  = Array.isArray(prefs.dictionaryOrder) && prefs.dictionaryOrder.length ? prefs.dictionaryOrder : savedList;
   const allIds      = dicts.map(d => d.id);
   const ordered     = [...savedOrder.filter(id => allIds.includes(id)), ...allIds.filter(id => !savedOrder.includes(id))];
-  // enabled set: null = none; [] = all; [...] = explicit list
-  const enabled = new Set(prefs.dictionaries === null ? [] : savedList.length ? savedList : allIds);
+  // Default (never-configured) state: match showDictPopup's own default-state logic below —
+  // enable dictionaries whose "from" language matches the book's, falling back to all if the
+  // book's language is unknown or nothing is tagged for it. Without this, a book in any
+  // non-English language would show every installed dictionary checked regardless of relevance.
+  const rawLang  = (_cxReader && _cxReader._book?.metadata?.language) || currentBook?.language;
+  const bookLang = normalizeBookLang(rawLang);
+  const defaultIds = bookLang
+    ? (dicts.filter(d => (prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang).map(d => d.id))
+    : [];
+  const defaultEnabledIds = defaultIds.length ? defaultIds : allIds;
+  // enabled set: null = none; [] = default (book-language match, or all); [...] = explicit list
+  const enabled = new Set(prefs.dictionaries === null ? [] : savedList.length ? savedList : defaultEnabledIds);
 
   function saveOrder() {
     const items = container.querySelectorAll('.dict-settings-item');
@@ -4525,6 +4555,22 @@ function pushInternalProgress(docKey, xpointer, pct, force = false) {
   }).catch(() => {});
 }
 
+// The BookOrbit progress push triggered server-side by the kosync-internal PUT above is
+// fire-and-forget (no latency added to page turns), so its outcome isn't known yet when
+// that request resolves. Check shortly after via the passive (no network-to-BookOrbit)
+// last-status endpoint. `always` shows the toast unconditionally (manual push button);
+// otherwise it's shown once per book load, matching the existing KOSync warning pattern.
+function checkBookorbitStatus({ always = false } = {}) {
+  if (!always && _bookorbitWarnedThisSession) return;
+  setTimeout(() => {
+    apiFetch('/bookorbit/last-status').then(s => {
+      if (!s?.enabled || s.reachable !== false) return;
+      if (!always) _bookorbitWarnedThisSession = true;
+      toast.warn(t('reader.bookorbit_unreachable'));
+    }).catch(() => {}); // non-critical — never surface as a hard failure
+  }, 1500);
+}
+
 function cancelDebouncedSync() {
   if (syncDebounceTimer) {
     clearTimeout(syncDebounceTimer);
@@ -4632,6 +4678,7 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
   if (shouldPushKosync) {
     lastSyncedCfi = cfi; // record what we just synced
     bestKnownRemotePct = pct; // update high-water mark (may go down if user confirmed backwards)
+    checkBookorbitStatus();
   }
 }
 
@@ -4921,10 +4968,46 @@ function _cxRelocatedHandler(e) {
       // Within-chapter page turn — debounce remote push (matches epub.js pattern).
       scheduleDebouncedSync();
     }
+
+    // True end of book — CXReader's pct is a page-fraction that never actually reaches 1.0
+    // (see server/utils/bookCompletion.js), so detect the real last page directly instead:
+    // last page of the last spine item. Not shown in peek mode (peek never saves progress).
+    const spineTotal = _cxReader?.spine?.length || 0;
+    const atBookEnd = pageCount > 0 && page >= pageCount && spineTotal > 0 && spineIndex === spineTotal - 1;
+    if (atBookEnd && !_finishedMessageShown && !isPeekMode) {
+      _finishedMessageShown = true;
+      saveProgress({ forceRemote: true }).catch(() => {});
+      showBookFinishedOverlay();
+    }
   }
   _attachCxKbd(_cxReader?.iframe);
   _attachCxDict(_cxReader?.iframe);
   _attachCxTouchNav(_cxReader?.iframe);
+}
+
+// Shown once automatically the moment the reader lands on the true last page of the book, and
+// again on demand (see goNext()) if the user presses "next" again while already there.
+function showBookFinishedOverlay() {
+  if (document.querySelector('.book-finished-backdrop')) return; // already showing — avoid stacking
+  const bd = document.createElement('div');
+  bd.className = 'modal-backdrop book-finished-backdrop';
+  bd.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:420px;text-align:center">
+      <div class="book-finished-icon" style="font-size:2.5rem;margin-bottom:.5rem">🎉</div>
+      <h3 style="margin:0 0 .75rem;font-size:1.05rem;font-weight:600">${t('reader.book_finished_title')}</h3>
+      <p style="margin:0 0 1.5rem;font-size:.85rem;line-height:1.5;color:var(--color-text-muted)">
+        ${t('reader.book_finished_body', { title: escapeHtml(currentBook?.title || '') })}
+      </p>
+      <div class="modal-footer" style="justify-content:center">
+        <button class="btn btn-secondary" id="book-finished-continue">${t('reader.book_finished_continue')}</button>
+        <button class="btn btn-primary"   id="book-finished-close">${t('reader.book_finished_close')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(bd);
+  const close = () => bd.remove();
+  bd.querySelector('#book-finished-continue').addEventListener('click', close);
+  bd.querySelector('#book-finished-close').addEventListener('click', () => { close(); void returnToLibrary(); });
+  bd.addEventListener('click', e => { if (e.target === bd) close(); });
 }
 
 function _attachCxKbd(iframe) {
@@ -5415,6 +5498,14 @@ function goNext() {
   if (_navThrottle()) return;
   if (!_cxReader) return;
   if (_useEngineSlide()) { _cxSlideTurn('next'); return; }
+  // Already on the true last page of the last chapter — CXReader.next() would silently no-op
+  // (see CXReader.next() in cxreader/index.js). Re-show the "book finished" overlay (with its
+  // own "return to library" option) instead of doing nothing, since the automatic one-time
+  // overlay from _cxRelocatedHandler may already have been dismissed by now.
+  const spineTotal = _cxReader?.spine?.length || 0;
+  const atBookEnd = currentChapTotal > 0 && currentChapPage >= currentChapTotal
+    && spineTotal > 0 && currentSpineIndex === spineTotal - 1;
+  if (atBookEnd) { showBookFinishedOverlay(); return; }
   _pageExit('next');
   pendingNavDirection = 'next';
   sessionPageCount++;
@@ -6273,6 +6364,7 @@ document.getElementById('kosync-zone-br')?.addEventListener('click', async () =>
     toast.error(t('reader.kosync_push_error'));
   } else {
     toast.success(t('reader.kosync_push_done', { pct: Math.round(currentPct * 100) }));
+    checkBookorbitStatus({ always: true });
   }
 });
 document.getElementById('btn-toc').addEventListener('click', () =>
@@ -6490,6 +6582,19 @@ window.addEventListener('beforeunload', () => {
   stopPeriodicSync();
   if (!prefs.skipSaveOnClose) saveProgressBackground();
   endStatsSessionBackground();
+  // Ephemeral BookOrbit peek (see server/utils/peekCleanup.js) — signal the server to delete the
+  // temp row + file now, rather than waiting for the background sweep. Best-effort only: async
+  // work isn't guaranteed to finish during page teardown, especially on an abrupt/forced close —
+  // the keepalive fetch below and the server-side sweep are the actual guarantees, not this call.
+  if (isPeekMode && currentBook?.peek_expires_at) {
+    const token = getToken();
+    fetch(`/api/books/${currentBook.id}/peek-cleanup`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      keepalive: true,
+    }).catch(() => {});
+    removeBook(currentBook.id).catch(() => {}); // best-effort IndexedDB metadata cleanup
+  }
 });
 document.addEventListener('fullscreenchange', async () => {
   syncFullscreenButton();
@@ -6625,7 +6730,9 @@ async function init() {
           if (!_res.ok) throw new Error('HTTP ' + _res.status);
           currentBook = await _res.json();
           log('[reader] book metadata from network:', currentBook.title);
-          saveBookMeta(currentBook).catch(() => {});
+          // Ephemeral peek rows are deleted shortly after close — don't leave a metadata entry
+          // behind in the offline IndexedDB store for an id that will never be reopened.
+          if (!isPeekMode) saveBookMeta(currentBook).catch(() => {});
         } catch (_netErr) {
           if (_localMeta) {
             currentBook = _localMeta;
@@ -6645,7 +6752,7 @@ async function init() {
     const msg = t('reader.err_no_book');
     loadingMsg.textContent = msg;
     toast.error(msg);
-    setTimeout(() => { window.location.href = '/'; }, 2500);
+    setTimeout(() => { window.location.href = libraryReturnUrl; }, 2500);
     return;
   }
 
@@ -6722,7 +6829,7 @@ async function init() {
       console.error('[reader] no epub available');
       loadingMsg.textContent = msg;
       toast.error(msg);
-      setTimeout(() => { window.location.href = '/'; }, 2500);
+      setTimeout(() => { window.location.href = libraryReturnUrl; }, 2500);
       return;
     }
   }

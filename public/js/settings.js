@@ -2,6 +2,7 @@ import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading } from './ui.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
+import { setBookorbitNavVisible } from './sidebar.js';
 
 let _initialized    = false;
 let _cachedServers  = [];
@@ -23,11 +24,14 @@ const kosyncInternalEnabled  = document.getElementById('kosync-internal-enabled'
 const kosyncInternalUrlBox   = document.getElementById('kosync-internal-url-box');
 const kosyncInternalUrlVal   = document.getElementById('kosync-internal-url-val');
 const btnSaveInternal        = document.getElementById('btn-save-internal');
+const bookorbitUrl           = document.getElementById('bookorbit-url');
 const bookorbitSyncEnabled   = document.getElementById('bookorbit-sync-enabled');
 const bookorbitNeedCreds     = document.getElementById('bookorbit-sync-needcreds');
 const btnSaveBookorbit       = document.getElementById('btn-save-bookorbit');
 const bookorbitAcctUsername  = document.getElementById('bookorbit-account-username');
 const bookorbitAcctPassword  = document.getElementById('bookorbit-account-password');
+const bookorbitStatus        = document.getElementById('bookorbit-status');
+const btnTestBookorbit       = document.getElementById('btn-test-bookorbit');
 
 // ── Load current settings ─────────────────────────────────────────────────────
 async function loadSettings() {
@@ -40,11 +44,13 @@ async function loadSettings() {
     updateStatusBadge(s.kosync_url ? null : 'not_configured');
     kosyncInternalEnabled.checked = s.kosync_internal_enabled || false;
     updateInternalUrlBox();
+    bookorbitUrl.value = s.bookorbit_url || '';
+    setStatusBadge(bookorbitStatus, s.bookorbit_url ? null : 'not_configured');
     bookorbitSyncEnabled.checked = s.bookorbit_sync_enabled || false;
     bookorbitAcctUsername.value = s.bookorbit_account_username || '';
     bookorbitAcctPassword.placeholder = s.has_bookorbit_account_password
       ? t('settings.kosync_pass_saved') : t('settings.kosync_pass_ph');
-    updateBookorbitGate(!!s.kosync_url && !!s.has_bookorbit_account_password);
+    updateBookorbitGate(!!s.bookorbit_url && !!s.has_bookorbit_account_password);
   } catch (err) {
     toast.error(t('settings.err_load', { msg: err.message }));
   }
@@ -66,24 +72,25 @@ function updateInternalUrlBox() {
 kosyncInternalEnabled.addEventListener('change', updateInternalUrlBox);
 
 // ── Status badge ──────────────────────────────────────────────────────────────
-function updateStatusBadge(reason) {
-  kosyncStatus.className = 'kosync-status';
+function setStatusBadge(el, reason) {
+  el.className = 'kosync-status';
   if (reason === null) {
     // We don't know yet — show neutral
-    kosyncStatus.textContent = '';
+    el.textContent = '';
     return;
   }
   if (reason === 'not_configured') {
-    kosyncStatus.classList.add('status-off');
-    kosyncStatus.textContent = t('settings.status_not_configured');
+    el.classList.add('status-off');
+    el.textContent = t('settings.status_not_configured');
   } else if (reason === 'ok') {
-    kosyncStatus.classList.add('status-ok');
-    kosyncStatus.textContent = t('settings.status_ok');
+    el.classList.add('status-ok');
+    el.textContent = t('settings.status_ok');
   } else {
-    kosyncStatus.classList.add('status-error');
-    kosyncStatus.textContent = t('common.error') + ': ' + reason;
+    el.classList.add('status-error');
+    el.textContent = t('common.error') + ': ' + reason;
   }
 }
+function updateStatusBadge(reason) { setStatusBadge(kosyncStatus, reason); }
 
 // ── Test connection ───────────────────────────────────────────────────────────
 btnTestKosync.addEventListener('click', async () => {
@@ -167,7 +174,6 @@ btnClearKosync.addEventListener('click', () => {
         kosyncPassword.value       = '';
         kosyncPassword.placeholder = t('settings.kosync_pass_ph');
         updateStatusBadge('not_configured');
-        updateBookorbitGate(false);
         toast.success(t('settings.removed'));
       } catch (err) {
         toast.error(t('common.error_msg', { msg: err.message }));
@@ -200,20 +206,25 @@ btnSaveInternal.addEventListener('click', async () => {
 
 // ── Save BookOrbit extended-sync account + toggle ──────────────────────────────
 btnSaveBookorbit.addEventListener('click', async () => {
+  const url      = bookorbitUrl.value.trim();
   const username = bookorbitAcctUsername.value.trim();
   const password = bookorbitAcctPassword.value; // empty = keep existing
   setButtonLoading(btnSaveBookorbit, true, t('settings.btn_saving'));
   try {
     const body = {
+      bookorbit_url: url,
       bookorbit_account_username: username,
       bookorbit_sync_enabled: bookorbitSyncEnabled.checked,
     };
     if (password) body.bookorbit_account_password = password;
     await apiFetch('/settings', { method: 'PUT', body: JSON.stringify(body) });
     bookorbitAcctPassword.value = '';
-    const hasCreds = !!kosyncUrl.value.trim() && (!!password || bookorbitAcctPassword.placeholder === t('settings.kosync_pass_saved'));
+    const hasCreds = !!url && (!!password || bookorbitAcctPassword.placeholder === t('settings.kosync_pass_saved'));
     updateBookorbitGate(hasCreds);
     if (password) bookorbitAcctPassword.placeholder = t('settings.kosync_pass_saved');
+    // Reflect the toggle in the sidebar immediately — otherwise the "BookOrbit" nav item only
+    // shows/hides after the next full page load (sidebar.js reads this once at init).
+    setBookorbitNavVisible(bookorbitSyncEnabled.checked);
     toast.success(bookorbitSyncEnabled.checked
       ? t('settings.bookorbit_enabled')
       : t('settings.bookorbit_disabled'));
@@ -221,6 +232,45 @@ btnSaveBookorbit.addEventListener('click', async () => {
     toast.error(t('common.error_msg', { msg: err.message }));
   } finally {
     setButtonLoading(btnSaveBookorbit, false, t('settings.btn_save'));
+  }
+});
+
+// ── Test BookOrbit connection ──────────────────────────────────────────────────
+btnTestBookorbit.addEventListener('click', async () => {
+  const url      = bookorbitUrl.value.trim();
+  const username = bookorbitAcctUsername.value.trim();
+  const password = bookorbitAcctPassword.value;
+
+  if (!url || !username) {
+    toast.error(t('settings.kosync_url_required'));
+    return;
+  }
+
+  setButtonLoading(btnTestBookorbit, true, t('settings.btn_testing'));
+  try {
+    // Save current form values first so the server-side test uses them (mirrors the
+    // KOSync test button) — does NOT flip the enabled toggle, so testing is safe before
+    // switching extended sync on.
+    const body = { bookorbit_url: url, bookorbit_account_username: username };
+    if (password) body.bookorbit_account_password = password;
+    await apiFetch('/settings', { method: 'PUT', body: JSON.stringify(body) });
+    if (password) {
+      bookorbitAcctPassword.value       = '';
+      bookorbitAcctPassword.placeholder = t('settings.kosync_pass_saved');
+    }
+
+    const res = await apiFetch('/bookorbit/test');
+    if (res.reachable) {
+      setStatusBadge(bookorbitStatus, 'ok');
+      toast.success(t('settings.test_ok'));
+    } else {
+      setStatusBadge(bookorbitStatus, res.error || 'error');
+      toast.error(t('settings.test_fail', { reason: res.error || '?' }));
+    }
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btnTestBookorbit, false, t('settings.btn_test_kosync'));
   }
 });
 // ── Admin: registration toggle ───────────────────────────────────────────
@@ -469,6 +519,7 @@ async function loadAdminSection() {
     const { isAdmin, user: _ } = await apiFetch('/auth/me');
     if (!isAdmin) return;
     adminCard.hidden = false;
+    document.getElementById('settings-tab-admin').hidden = false;
     const { enabled } = await apiFetch('/auth/registration-status');
     adminRegTgl.checked = enabled;
     await loadAdminUsers();
@@ -719,6 +770,22 @@ btnAddOpds.addEventListener('click', async () => {
 });
 
 btnCancelEdit.addEventListener('click', exitEditMode);
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────────
+  // One panel visible at a time instead of one long scrolling page. Always starts on
+  // "General" — the admin tab may still be .hidden at this point (loadAdminSection()
+  // reveals it async), so there's nothing to restore/race against.
+  function initSettingsTabs() {
+    const tabs   = document.querySelectorAll('.settings-tab');
+    const panels = document.querySelectorAll('.settings-tab-panel');
+    tabs.forEach(tabBtn => {
+      tabBtn.addEventListener('click', () => {
+        tabs.forEach(b => b.classList.toggle('active', b === tabBtn));
+        panels.forEach(p => { p.hidden = p.dataset.tabPanel !== tabBtn.dataset.tab; });
+      });
+    });
+  }
+  initSettingsTabs();
 
   // ── Init ──────────────────────────────────────────────────────────────────────
   loadSettings();

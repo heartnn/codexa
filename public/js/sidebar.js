@@ -19,6 +19,8 @@ let _activeShelfId    = 'all';
 let _readingCount     = 0;
 let _downloadedCount  = 0;
 let _shelfEditMode    = false;
+let _bookorbitVisible = false;
+let _bookorbitWarning = false;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -40,6 +42,13 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
   initLibraryThemeControls(sidebar);
   initDisplaySizeControls(sidebar);
   initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
+
+  // BookOrbit nav item visibility — fetched here (not left to library.js's own /settings
+  // fetch) so it's correct even when the app opens directly into a non-library panel.
+  apiFetch('/settings').then(s => {
+    setBookorbitNavVisible(!!s.bookorbit_sync_enabled);
+    if (s.bookorbit_sync_enabled) checkBookorbitHealth();
+  }).catch(() => {});
 
   // Username
   const user = JSON.parse(localStorage.getItem('br_user') || '{}');
@@ -113,6 +122,11 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
     if (!navigator.onLine) return;
     showPanel('opds'); closeSidebar();
   });
+  sidebar.querySelector('#nav-bookorbit')?.addEventListener('click', e => {
+    e.preventDefault();
+    if (!navigator.onLine) return;
+    showPanel('bookorbit'); closeSidebar();
+  });
 
   // Statistics button
   sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
@@ -126,6 +140,8 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
     sidebar.querySelector('#nav-settings')?.classList.add('sidebar-item-active');
   } else if (currentPanel === 'opds') {
     sidebar.querySelector('#nav-opds')?.classList.add('sidebar-item-active');
+  } else if (currentPanel === 'bookorbit') {
+    sidebar.querySelector('#nav-bookorbit')?.classList.add('sidebar-item-active');
   } else {
     setActive(activeShelfId);
   }
@@ -134,16 +150,21 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
   document.addEventListener('panelchange', e => {
     _activePage = e.detail.panel;
     if (_activePage === 'settings') {
-      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-opds')
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-opds, #nav-bookorbit')
         .forEach(el => el.classList.remove('sidebar-item-active'));
       document.getElementById('nav-settings')?.classList.add('sidebar-item-active');
     } else if (_activePage === 'opds') {
-      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings')
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings, #nav-bookorbit')
         .forEach(el => el.classList.remove('sidebar-item-active'));
       document.getElementById('nav-opds')?.classList.add('sidebar-item-active');
+    } else if (_activePage === 'bookorbit') {
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings, #nav-opds')
+        .forEach(el => el.classList.remove('sidebar-item-active'));
+      document.getElementById('nav-bookorbit')?.classList.add('sidebar-item-active');
     } else {
       document.getElementById('nav-settings')?.classList.remove('sidebar-item-active');
       document.getElementById('nav-opds')?.classList.remove('sidebar-item-active');
+      document.getElementById('nav-bookorbit')?.classList.remove('sidebar-item-active');
       setActive(_activeShelfId);
     }
   });
@@ -181,7 +202,7 @@ export function getShelves() { return shelves; }
 
 export function setActive(shelfId) {
   _activeShelfId = shelfId;
-  document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings, #nav-opds')
+  document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings, #nav-opds, #nav-bookorbit')
     .forEach(el => el.classList.remove('sidebar-item-active'));
 
   if (shelfId === 'all') {
@@ -211,6 +232,26 @@ export function updateDownloadedCount(n) {
   const countEl = document.getElementById('nav-downloaded-count');
   if (el)      el.style.display = n > 0 ? '' : 'none';
   if (countEl) countEl.textContent = n > 0 ? String(n) : '';
+}
+
+export function setBookorbitNavVisible(visible) {
+  _bookorbitVisible = !!visible;
+  const el = document.getElementById('nav-bookorbit');
+  if (el) el.style.display = _bookorbitVisible ? '' : 'none';
+}
+
+// Small warning badge on the BookOrbit nav item when it's enabled but unreachable —
+// survives sidebar re-renders (langchange) since _bookorbitWarning is module state.
+export function setBookorbitWarning(show) {
+  _bookorbitWarning = !!show;
+  document.getElementById('nav-bookorbit-warning')?.classList.toggle('hidden', !_bookorbitWarning);
+}
+
+// One active reachability check per app load (fire-and-forget — never blocks the library).
+function checkBookorbitHealth() {
+  apiFetch('/bookorbit/health')
+    .then(h => setBookorbitWarning(h.enabled && h.reachable === false))
+    .catch(() => {}); // non-critical — leave the warning state as-is
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -259,6 +300,11 @@ function buildSidebarHtml() {
         <div id="shelves-list"></div>
       </div>
       <div class="sidebar-divider"></div>
+      <a href="/?panel=bookorbit" class="sidebar-item" id="nav-bookorbit" style="${_bookorbitVisible ? '' : 'display:none'}">
+        <span class="sidebar-item-icon"><img src="/images/bookorbit.svg" class="nav-icon nav-icon-bookorbit" alt=""></span>
+        <span class="sidebar-item-label">${t('sidebar.bookorbit')}</span>
+        <span class="sidebar-item-warning hidden" id="nav-bookorbit-warning" title="${t('sidebar.bookorbit_unreachable')}">⚠</span>
+      </a>
       <a href="/?panel=opds" class="sidebar-item" id="nav-opds">
         <span class="sidebar-item-icon"><img src="/images/online_library.svg" class="nav-icon nav-icon-online-library" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.online_library')}</span>
@@ -315,8 +361,11 @@ function renderShelves() {
     item.className = 'sidebar-shelf-item' + (_activeShelfId === shelf.id ? ' sidebar-item-active' : '');
     item.dataset.id = shelf.id;
     item.draggable  = _shelfEditMode;
-    const shelfIcon = shelf.opds_folder_url ? 'opds_shelf' : 'shelf';
-    const shelfIconClass = shelf.opds_folder_url ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
+    // Same "linked" icon for a shelf synced from an OPDS folder or a BookOrbit collection/smart
+    // scope — both are just "this shelf tracks an external source" to the user.
+    const isLinked = !!(shelf.opds_folder_url || shelf.bo_collection_id || shelf.bo_smart_scope_id);
+    const shelfIcon = isLinked ? 'opds_shelf' : 'shelf';
+    const shelfIconClass = isLinked ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
     item.innerHTML = `
       <span class="shelf-drag-handle" title="${t('sidebar.drag_to_reorder')}" aria-hidden="true">⠿</span>
       <span class="sidebar-item-icon"><img src="/images/${shelfIcon}.svg" class="${shelfIconClass}" alt=""></span>
@@ -407,6 +456,7 @@ document.addEventListener('langchange', () => {
   initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
   const unameEl = sidebar.querySelector('#sidebar-username');
   if (unameEl) unameEl.textContent = username;
+  setBookorbitWarning(_bookorbitWarning);
   // Restore active panel
   if (_activePage === 'settings') {
     sidebar.querySelector('#nav-settings')?.classList.add('sidebar-item-active');
@@ -465,6 +515,11 @@ document.addEventListener('langchange', () => {
     e.preventDefault();
     if (!navigator.onLine) return;
     showPanel('opds'); closeSidebar();
+  });
+  sidebar.querySelector('#nav-bookorbit')?.addEventListener('click', e => {
+    e.preventDefault();
+    if (!navigator.onLine) return;
+    showPanel('bookorbit'); closeSidebar();
   });
   sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
     if (!navigator.onLine) return;

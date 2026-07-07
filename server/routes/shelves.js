@@ -9,7 +9,8 @@ router.use(authenticateToken);
 router.get('/', (req, res) => {
   const db = getDb();
   const shelves = db.prepare(`
-    SELECT s.id, s.name, s.created_at, s.opds_server_id, s.opds_folder_url, s.last_synced_at, s.sort_order,
+    SELECT s.id, s.name, s.created_at, s.opds_server_id, s.opds_folder_url,
+           s.bo_collection_id, s.bo_smart_scope_id, s.last_synced_at, s.sort_order,
            COUNT(bs.book_id) AS book_count
       FROM shelves s
       LEFT JOIN book_shelves bs ON bs.shelf_id = s.id
@@ -100,6 +101,19 @@ router.delete('/:id/opds-link', (req, res) => {
   if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
 
   db.prepare('UPDATE shelves SET opds_server_id = NULL, opds_folder_url = NULL, last_synced_at = NULL WHERE id = ?')
+    .run(shelf.id);
+  res.json({ success: true });
+});
+
+// ── DELETE /api/shelves/:id/bookorbit-link — remove BookOrbit collection/smart-scope origin ──
+router.delete('/:id/bookorbit-link', (req, res) => {
+  const db    = getDb();
+  const shelf = db.prepare(
+    'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
+  ).get(req.params.id, req.user.id);
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
+
+  db.prepare('UPDATE shelves SET bo_collection_id = NULL, bo_smart_scope_id = NULL, last_synced_at = NULL WHERE id = ?')
     .run(shelf.id);
   res.json({ success: true });
 });

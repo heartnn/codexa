@@ -205,6 +205,7 @@ html[data-lib-theme="eink"] .nav-icon-language          { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-appearance        { content: url('/images/appearance_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-display-size      { content: url('/images/display_size_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-online-library    { content: url('/images/online_library_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-bookorbit         { content: url('/images/bookorbit_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-folder            { content: url('/images/folder_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-delete            { content: url('/images/delete_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-delete-offline    { content: url('/images/delete_offline_bw.svg'); }
@@ -221,7 +222,11 @@ html[data-lib-theme="eink"] .nav-icon-statistics        { content: url('/images/
 html[data-lib-theme="eink"] .book-cover,
 html[data-lib-theme="eink"] .stats-book-cover,
 html[data-lib-theme="eink"] .info-modal-cover,
-html[data-lib-theme="eink"] .cover-preview-img { filter: grayscale(100%); }
+html[data-lib-theme="eink"] .cover-preview-img,
+html[data-lib-theme="eink"] .info-modal-kosync-result-cover,
+html[data-lib-theme="eink"] .imt-related-cover { filter: grayscale(100%); }
+html[data-lib-theme="eink"] .opds-welcome .icon,
+.sidebar-layout[data-lib-theme="eink"] .opds-welcome .icon { filter: grayscale(100%); }
 html[data-lib-theme="eink"] .book-offline-badge,
 .sidebar-layout[data-lib-theme="eink"] .book-offline-badge { background: #111; }
 html[data-lib-theme="eink"] .book-format-badge,
@@ -466,7 +471,8 @@ body.is-offline .offline-icon { display: inline-block; }
 body.is-offline .app-version { display: none; }
 html[data-lib-theme="eink"] .nav-icon-offline { content: url('/images/offline_bw.svg'); }
 body.is-offline #nav-settings,
-body.is-offline #nav-opds { opacity: 0.4; cursor: not-allowed; }
+body.is-offline #nav-opds,
+body.is-offline #nav-bookorbit { opacity: 0.4; cursor: not-allowed; }
 body.is-offline .sidebar-shelf-item,
 body.is-offline #add-shelf-btn { opacity: 0.4; cursor: not-allowed; }
 body.is-offline #sidebar-stats-btn { opacity: 0.4; cursor: not-allowed; }
@@ -562,6 +568,11 @@ body.is-offline #edit-mode-btn { opacity: 0.4; cursor: not-allowed; pointer-even
   line-height: 1.6;
 }
 .shelf-new-badge.hidden { display: none; }
+
+/* BookOrbit-unreachable warning icon — right-aligned like .shelf-count, shown when the
+   server is enabled but the last reachability check failed (see sidebar.js setBookorbitWarning). */
+.sidebar-item-warning { margin-left: auto; flex-shrink: 0; color: var(--warning, #d9822b); font-size: .9rem; }
+.sidebar-item-warning.hidden { display: none; }
 
 /* ── Grid density toggle ────────────────────────────────────────────────────── */
 .density-toggle {
@@ -701,7 +712,12 @@ html[data-lib-theme="eink"] .nav-icon-density-large   { content: url('/images/de
   position: absolute;
   top: .5rem;
   right: .5rem;
+  left: .5rem;
   gap: .3rem;
+  /* Compact density can be too narrow to fit every icon in one row (cover-preview + info +
+     offline-toggle + read) — wrap to a second row, right-aligned, instead of overflowing. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .book-card:hover .book-card-actions { display: flex; }
 .book-card { position: relative; }
@@ -963,6 +979,7 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 .app-sidebar.collapsed .sidebar-section-title,
 .app-sidebar.collapsed .sidebar-add-btn,
 .app-sidebar.collapsed .shelf-count,
+.app-sidebar.collapsed .sidebar-item-warning,
 .app-sidebar.collapsed .shelf-edit-btn,
 .app-sidebar.collapsed .sidebar-theme,
 .app-sidebar.collapsed .sidebar-username,
@@ -2490,6 +2507,10 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 .opds-toolbar {
   display: flex; align-items: center; gap: .5rem; padding: .6rem 1rem;
   border-bottom: 1px solid var(--color-border); background: var(--color-surface); flex-shrink: 0;
+  /* Without this, the row's height is whatever its tallest child needs — hiding the (taller)
+     sort select on the "Book Search" section shrinks the row, which shifts the search row
+     below it upward. Locking a min-height keeps everything below in place either way. */
+  min-height: 2.35rem;
 }
 #catalog-title { font-weight: 600; font-size: .9rem; margin-right: .25rem; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #breadcrumb {
@@ -2589,6 +2610,219 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
   .btn-add::after { content: '+'; font-size: 1.2rem; font-weight: 700; line-height: 1; }
   .btn-add { padding: .3rem .6rem; }
 }
+
+/* ── BookOrbit browser panel (reuses .opds-layout/.opds-sidebar/.opds-catalog/
+   .opds-toolbar/.opds-search-row/.opds-welcome/.opds-page-btn/.opds-page-info) ── */
+#panel-bookorbit:not([hidden]) { display: flex; flex: 1; overflow: hidden; }
+.app-body.bookorbit-active { overflow: hidden; }
+
+/* Title fills/yields all available space (grows into empty space when no library is selected,
+   shrinks+ellipsizes for long names) while the select holds a fixed compact size and never
+   wraps to its own line — no flex-wrap here, on purpose (see .opds-toolbar). */
+#bookorbit-title { font-weight: 600; font-size: .9rem; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Same checkmark dropdown as the main library grid (.sort-menu-wrap/.sort-menu-btn/etc., see
+   ~line 2281) — fixed at .sort-menu-wrap's own 160px min-width so it doesn't get squeezed by
+   the title/density-toggle competing for space in this tightly-packed toolbar row. */
+.bookorbit-sort-menu-wrap { flex-shrink: 0; max-width: 160px; }
+.bookorbit-nav { padding: .4rem; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.bookorbit-nav-item {
+  display: block; width: 100%; text-align: left; padding: .55rem .75rem;
+  border: none; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--color-text); font-size: .85rem; transition: background .15s;
+}
+.bookorbit-nav-item:hover { background: var(--color-surface2); }
+.bookorbit-nav-item.active { background: var(--color-accent); color: #fff; }
+
+#bookorbit-sublist { flex: 1; overflow-y: auto; padding: .4rem; border-top: 1px solid var(--color-border); }
+.bookorbit-sublist-row { display: flex; align-items: center; gap: 2px; margin-bottom: 2px; }
+.bookorbit-sublist-item {
+  display: flex; align-items: center; gap: .4rem; flex: 1; min-width: 0; text-align: left; padding: .45rem .6rem;
+  border: none; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--color-text); font-size: .8rem; transition: background .15s;
+}
+.bookorbit-sublist-item:hover { background: var(--color-surface2); }
+.bookorbit-sublist-item.active { background: var(--color-accent); color: #fff; }
+.bookorbit-sublist-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bookorbit-sublist-count { flex-shrink: 0; font-size: .72rem; opacity: .7; }
+.bookorbit-sublist-sync-btn {
+  flex-shrink: 0; border: none; background: none; cursor: pointer; border-radius: 6px;
+  padding: .3rem .45rem; color: var(--color-text-muted); font-size: .85rem; transition: background .15s, color .15s;
+}
+.bookorbit-sublist-sync-btn:hover { background: var(--color-surface2); color: var(--color-accent); }
+.bookorbit-sublist-pager {
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+  padding: .5rem 0 .2rem;
+}
+.bookorbit-sublist-pager .opds-page-btn { padding: .2rem .55rem; }
+.bookorbit-sublist-pager .opds-page-info { font-size: .76rem; }
+
+/* Sizing (grid-template-columns/gap) comes entirely from the shared .book-grid/.density-* classes
+   (see main.css ~line 601 and public/js/library.js's applyGridDensity) — kept off this id rule so
+   it can't out-specificity the density classes and end up a different card size than everywhere
+   else in the app. */
+#bookorbit-grid {
+  flex: 1; overflow-y: auto; padding: .75rem 1rem;
+  align-content: start;
+}
+/* NOT overflow:hidden here — BookOrbit's panel is a bounded, internally-scrolling layout
+   (unlike the main library grid, which lives in an unbounded page-scroll context where
+   .book-card can safely use overflow:hidden). overflow:hidden zeroes a box's "automatic
+   minimum size" for BOTH axes it applies to (CSS sizing spec) — on this bounded layout that
+   let the grid row shrink the card below its real content height, clipping the cover.
+   min-width:0 fixes the mobile-compact width-overflow problem instead (a long nowrap
+   author/series name inflating THIS grid item's own min-content width past its 1fr share,
+   which pushed/ballooned columns on the fixed 3-column mobile layout) — it only overrides
+   the width axis's automatic minimum, not height, so row sizing is unaffected. Must be on
+   the grid item itself (.bookorbit-card) — a descendant's min-width:0 (.bookorbit-card-info
+   below) isn't enough, since grid track sizing reads the item's own minimum. */
+.bookorbit-card { display: flex; flex-direction: column; min-width: 0; }
+/* The wrapper only positions the hover-action overlay + downloaded badge — it must NOT carry
+   aspect-ratio/overflow:hidden itself. A plain (non-replaced) box with aspect-ratio, sitting as
+   a flex item with an otherwise-ambiguous "auto" main size, has its automatic content size
+   resolve to 0 when overflow isn't visible — the ratio is accepted by the cascade but never
+   produces a height. Putting aspect-ratio on the <img>/placeholder instead (a replaced element,
+   like .book-cover in main.css ~639) sizes reliably; the wrapper then just sizes to match it. */
+.bookorbit-card-cover-wrap { position: relative; }
+.bookorbit-card-cover {
+  width: 100%; aspect-ratio: 2 / 3; border-radius: 6px; object-fit: cover; display: block;
+  background: var(--color-surface2); box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.bookorbit-card-cover-ph { display: flex; align-items: center; justify-content: center; font-size: 2rem; opacity: .5; }
+/* Padded text block below the cover — mirrors .book-info (main.css ~655) so cards get the
+   same breathing room as the main library grid instead of text sitting flush against the
+   cover edge and the next row. */
+.bookorbit-card-info {
+  padding: .6rem .75rem .75rem;
+  flex: 1;
+  min-width: 0; /* lets long nowrap author/series text shrink instead of inflating the card's width */
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+.bookorbit-card-title {
+  font-size: .82rem; font-weight: 600; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.bookorbit-card-author { font-size: .74rem; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bookorbit-card-series { font-size: .72rem; color: var(--color-accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Icon-only action buttons overlaid on the cover — hover to reveal (desktop) or tap the card
+   once (touch, via .tapped — see bookorbit.js), matching public/js/library.js's card actions
+   instead of taking a separate row of text buttons below every card. */
+.bookorbit-card-actions {
+  display: none; position: absolute; top: .4rem; right: .4rem; left: .4rem; gap: .3rem;
+  /* Compact density can be too narrow to fit every icon in one row — wrap to a second row,
+     right-aligned, instead of overflowing past the cover. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.bookorbit-card-cover-wrap:hover .bookorbit-card-actions,
+.bookorbit-card.tapped .bookorbit-card-actions { display: flex; }
+.bookorbit-card-actions .btn-icon {
+  background: rgba(0, 0, 0, 0.65); color: #fff; border-color: rgba(255, 255, 255, 0.4);
+  width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center;
+  font-size: .95rem;
+}
+.bookorbit-card-actions .btn-icon:hover { background: rgba(180, 30, 30, 0.85); border-color: rgba(255, 255, 255, 0.7); color: #fff; }
+.bookorbit-card-actions .btn-icon:disabled { opacity: .5; cursor: default; }
+.bookorbit-card-actions .btn-icon:disabled:hover { background: rgba(0, 0, 0, 0.65); border-color: rgba(255, 255, 255, 0.4); }
+.bookorbit-card-actions .btn-icon .nav-icon { filter: brightness(0) invert(1); width: 16px; height: 16px; }
+.bookorbit-card-actions .btn-icon.bookorbit-btn-busy { opacity: .6; }
+html[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon,
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon {
+  background: rgba(255, 255, 255, 0.92); color: #111; border-color: rgba(0, 0, 0, 0.55);
+}
+html[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon .nav-icon { filter: none; }
+
+/* Always-visible peek icon, bottom-right of the cover — separate from the top-right hover-action
+   row so a 4th top icon (peek for not-yet-owned books) doesn't overflow the cover. Mirrors
+   .book-card-peek-btn (main.css ~1975) exactly. */
+.bookorbit-card-peek-btn {
+  position: absolute; bottom: 5px; right: 5px;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.60); border: 1px solid rgba(255, 255, 255, 0.35);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .15s; z-index: 2; text-decoration: none;
+}
+.bookorbit-card-peek-btn .nav-icon { filter: brightness(0) invert(1); width: 14px; height: 14px; }
+.bookorbit-card-peek-btn:disabled { cursor: default; }
+.bookorbit-card-cover-wrap:hover .bookorbit-card-peek-btn,
+.bookorbit-card.tapped .bookorbit-card-peek-btn { opacity: 1; }
+.bookorbit-card-cover-wrap:hover .bookorbit-card-peek-btn.bookorbit-btn-busy,
+.bookorbit-card.tapped .bookorbit-card-peek-btn.bookorbit-btn-busy { opacity: .6; }
+html[data-lib-theme="eink"] .bookorbit-card-peek-btn,
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-peek-btn {
+  background: rgba(255, 255, 255, 0.90); border-color: rgba(0, 0, 0, 0.55);
+}
+html[data-lib-theme="eink"] .bookorbit-card-peek-btn .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-peek-btn .nav-icon { filter: none; }
+
+#bookorbit-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--color-text-muted); }
+#bookorbit-empty { padding: 2rem; color: var(--color-text-muted); text-align: center; }
+#bookorbit-pagination {
+  display: flex; align-items: center; justify-content: center; gap: .75rem;
+  padding: .5rem 1rem; border-top: 1px solid var(--color-border); flex-shrink: 0;
+}
+
+/* Drawer toggle/close controls only exist for the off-canvas mobile layout — inert on desktop,
+   where .opds-sidebar is always visible inline (see the @media block below). */
+.bookorbit-drawer-toggle-btn {
+  display: none; flex-shrink: 0; border: none; background: none; cursor: pointer;
+  font-size: 1.1rem; padding: .3rem .5rem; color: var(--color-text); border-radius: 6px;
+}
+.bookorbit-drawer-toggle-btn:hover { background: var(--color-surface2); }
+.bookorbit-drawer-close-btn {
+  display: none; border: none; background: none; cursor: pointer; font-size: 1.3rem;
+  line-height: 1; color: var(--color-text-muted); padding: 0 .25rem;
+}
+#bookorbit-drawer-overlay { display: none; }
+
+@media (max-width: 768px) {
+  .app-body.bookorbit-active { overflow-x: hidden; overflow-y: auto; }
+  #panel-bookorbit:not([hidden]) { overflow-x: hidden; overflow-y: auto; }
+  /* min-width:0 lets the grid shrink below its content's min-content width — without it,
+     a flex child defaults to min-width:auto and the compact 3-column layout overflows
+     instead of shrinking, clipping the last card (mirrors #catalog-grid's fix above). */
+  #bookorbit-grid { overflow: visible; min-width: 0; } /* column sizing comes from .book-grid/.density-* — see ~2647 */
+  #bookorbit-pagination { flex-wrap: wrap; gap: .4rem; padding: .4rem .75rem; }
+
+  /* The sidebar (section nav + sublist) used to permanently stack above the grid, leaving only
+     a sliver of screen for actual books. It's now an off-canvas drawer instead: hidden by
+     default, opened via the toolbar's ☰ button, and auto-closed the moment a library/collection/
+     series/author is picked so the book grid gets the full screen right away. */
+  .bookorbit-drawer-toggle-btn { display: inline-flex; align-items: center; justify-content: center; }
+  #panel-bookorbit .opds-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 210;
+    width: 85%; max-width: 320px; height: 100%;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    box-shadow: 2px 0 12px rgba(0,0,0,.3);
+  }
+  #panel-bookorbit .opds-sidebar.bookorbit-drawer-open { transform: translateX(0); }
+  .bookorbit-drawer-close-btn { display: inline-block; }
+  #bookorbit-drawer-overlay {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(0,0,0,.5); z-index: 205;
+  }
+  #bookorbit-drawer-overlay.visible { display: block; }
+}
+
+/* ── Settings tabs — one tab-panel visible at a time instead of one long scroll.
+   Horizontally scrollable with a hidden scrollbar so it stays usable on narrow/mobile
+   screens (same pattern as the book-info modal's .info-modal-tabs/.imt-tab). ── */
+.settings-tabs {
+  display: flex; overflow-x: auto; scrollbar-width: none;
+  border-bottom: 1px solid var(--color-border); margin-bottom: 1.5rem; gap: 0;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tab {
+  flex-shrink: 0; background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--color-text-muted); cursor: pointer; font-size: .9rem; font-weight: 600;
+  padding: .65rem 1.1rem; transition: color .15s, border-color .15s;
+  white-space: nowrap; margin-bottom: -1px;
+}
+.settings-tab:hover { color: var(--color-text); }
+.settings-tab.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
 
 /* ── Settings cards ───────────────────────────────────────────────────────── */
 .settings-card {
@@ -2799,7 +3033,9 @@ html[data-lib-theme="eink"] #edit-remove-btn,
 
 /* Online library book cover thumbnails */
 html[data-lib-theme="eink"] .book-row-thumb,
-.sidebar-layout[data-lib-theme="eink"] .book-row-thumb { filter: grayscale(100%); }
+.sidebar-layout[data-lib-theme="eink"] .book-row-thumb,
+html[data-lib-theme="eink"] .bookorbit-card-cover,
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-cover { filter: grayscale(100%); }
 
 /* Book info: genre tags */
 html[data-lib-theme="eink"] .genre-pill,

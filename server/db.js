@@ -6,7 +6,7 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || './data');
 const DB_PATH = path.join(DATA_DIR, 'codexa.db');
 
 // Ensure data directories exist on startup
-['books', 'covers', 'fonts', 'tmp'].forEach(dir => {
+['books', 'covers', 'fonts', 'tmp', 'tmp/peek'].forEach(dir => {
   fs.mkdirSync(path.join(DATA_DIR, dir), { recursive: true });
 });
 
@@ -221,6 +221,19 @@ function initDb() {
     // Bookmark sync tracking (create/delete only — BookOrbit's bookmark API has no update route)
     [`ALTER TABLE bookmarks       ADD COLUMN bo_id                 TEXT    DEFAULT ''`,       'bookmarks.bo_id'],
     [`ALTER TABLE bookmarks       ADD COLUMN deleted                INTEGER DEFAULT 0`,       'bookmarks.deleted'],
+    // Shelf <-> BookOrbit collection/smart-scope link, parallel to opds_server_id/opds_folder_url
+    // (see server/routes/bookorbit.js sync-sse).
+    [`ALTER TABLE shelves         ADD COLUMN bo_collection_id       INTEGER DEFAULT NULL`,     'shelves.bo_collection_id'],
+    [`ALTER TABLE shelves         ADD COLUMN bo_smart_scope_id      INTEGER DEFAULT NULL`,     'shelves.bo_smart_scope_id'],
+    // BookOrbit's own server URL — extended sync used to piggyback on kosync_url (BookOrbit's
+    // KOReader-plugin URL and its web-API base happen to share a host), but that coupling was
+    // confusing in Settings (BookOrbit has nothing to do with KOReader Sync) and forced enabling
+    // KOReader Sync's own fields just to configure BookOrbit. Now standalone; see backfill below.
+    [`ALTER TABLE user_settings   ADD COLUMN bookorbit_url          TEXT    DEFAULT ''`,       'user_settings.bookorbit_url'],
+    // Non-null = ephemeral "peek" row (BookOrbit book fetched for a read-only look, never
+    // imported) — safe to delete after this unix timestamp or on explicit close signal.
+    // See server/utils/peekCleanup.js.
+    [`ALTER TABLE books           ADD COLUMN peek_expires_at        INTEGER DEFAULT NULL`,     'books.peek_expires_at'],
   ];
   for (const [sql, label] of migrations) {
     try {
@@ -250,6 +263,19 @@ function initDb() {
     database.exec(`UPDATE annotations SET updated_at = created_at WHERE updated_at IS NULL`);
   } catch (e) {
     console.warn('[db] annotations.updated_at backfill:', e.message);
+  }
+
+  // One-time: users who already had BookOrbit extended sync enabled were relying on kosync_url
+  // as BookOrbit's server address. Copy it into the new standalone field so their setup keeps
+  // working after the split, without needing to re-enter it.
+  try {
+    database.exec(`
+      UPDATE user_settings
+         SET bookorbit_url = kosync_url
+       WHERE bookorbit_sync_enabled = 1 AND (bookorbit_url IS NULL OR bookorbit_url = '') AND kosync_url != ''
+    `);
+  } catch (e) {
+    console.warn('[db] bookorbit_url backfill:', e.message);
   }
 }
 

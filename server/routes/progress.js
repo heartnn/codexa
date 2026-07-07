@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb }             = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { maybeMarkBookFinished } = require('../utils/bookCompletion');
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -62,6 +63,8 @@ router.put('/:hash', (req, res) => {
     UPDATE books SET last_opened_at = strftime('%s', 'now')
      WHERE user_id = ? AND file_hash = ?
   `).run(req.user.id, req.params.hash);
+
+  maybeMarkBookFinished(req.user.id, req.params.hash);
 
   res.json({ success: true });
 });

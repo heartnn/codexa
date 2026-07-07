@@ -17,6 +17,7 @@ const shelvesRoutes    = require('./routes/shelves');
 const bookmarksRoutes    = require('./routes/bookmarks');
 const annotationsRoutes  = require('./routes/annotations');
 const statsRoutes        = require('./routes/stats');
+const bookorbitRoutes    = require('./routes/bookorbit');
 const bookorbitSync      = require('./services/bookorbitSync');
 const { installConsolePrefix } = require('./utils/logger');
 
@@ -132,6 +133,7 @@ app.use('/api/dictionary', dictionaryRoutes);
 app.use('/api/bookmarks',    bookmarksRoutes);
 app.use('/api/annotations',  annotationsRoutes);
 app.use('/api/stats',        statsRoutes);
+app.use('/api/bookorbit',    bookorbitRoutes);
 
 // KOReader kosync protocol — must be AFTER /api routes to avoid shadowing
 // KOReader devices point their sync settings to this server's base URL.
@@ -168,3 +170,12 @@ setInterval(() => {
   } catch { return; }
   for (const u of users) bookorbitSync.triggerSync(u.user_id);
 }, BOOKORBIT_SYNC_INTERVAL_MS).unref();
+
+// ── Ephemeral "peek" book cleanup — background sweep ──────────────────────────
+// The reader signals a clean close via POST /api/books/:id/peek-cleanup (best-effort), but a
+// forced close/crash can't be trusted to fire that. This sweep is the actual guarantee: any
+// ephemeral peek row (+ its temp file) past its expiry gets reclaimed regardless.
+const { sweepExpiredPeeks } = require('./utils/peekCleanup');
+const PEEK_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+sweepExpiredPeeks(); // reclaim anything already expired across a restart
+setInterval(sweepExpiredPeeks, PEEK_SWEEP_INTERVAL_MS).unref();

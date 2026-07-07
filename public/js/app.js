@@ -1,9 +1,10 @@
 import { initI18n } from './i18n.js';
 import { initSidebar } from './sidebar.js';
 import { initRouter } from './router.js';
-import { initLibrary, selectShelf } from './library.js';
+import { initLibrary, selectShelf, initGridDensityToggle } from './library.js';
 import { initSettings } from './settings.js';
 import { initOpds } from './opds.js';
+import { initBookorbit } from './bookorbit.js';
 import { requireAuth } from './api.js';
 import { flushProgressOutbox } from './progress-outbox.js';
 import { log } from './logger.js';
@@ -18,6 +19,23 @@ if (!requireAuth()) {
 // later reflow corrects it (it looked like the page "jumped down" once books loaded).
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
+// Numeric per-segment comparison of "X.Y.Z" version strings — a plain string/inequality
+// check would wrongly flag an update for e.g. remote "1.2.100" vs local "1.2.99" (lexically
+// "100" < "99"), and would also flag one for a LOCAL build ahead of what's published on
+// GitHub (a dev/pre-release version), which should never show an update badge.
+function parseVersionParts(v) {
+  return String(v || '').trim().split('.').map(n => parseInt(n, 10) || 0);
+}
+function isNewerVersion(remote, local) {
+  const r = parseVersionParts(remote);
+  const l = parseVersionParts(local);
+  for (let i = 0; i < Math.max(r.length, l.length); i++) {
+    const rn = r[i] || 0, ln = l[i] || 0;
+    if (rn !== ln) return rn > ln;
+  }
+  return false;
+}
+
 async function checkForUpdate(localVersion) {
   if (sessionStorage.getItem('br_update_checked')) return;
   sessionStorage.setItem('br_update_checked', '1');
@@ -25,7 +43,7 @@ async function checkForUpdate(localVersion) {
     const r = await fetch('https://raw.githubusercontent.com/thehijacker/codexa/refs/heads/main/package.json');
     if (!r.ok) return;
     const { version: remote } = await r.json();
-    if (remote && remote !== localVersion) {
+    if (remote && isNewerVersion(remote, localVersion)) {
       document.querySelectorAll('a.logo').forEach(logo => {
         if (logo.querySelector('.update-badge')) return;
         logo.insertAdjacentHTML('beforeend',
@@ -78,6 +96,7 @@ document.addEventListener('app:network-restored', fetchAndShowVersion);
 (async () => {
   await initI18n();
   await initSidebar({ onShelfSelect: selectShelf });
+  initGridDensityToggle();
   // Force an early layout pass + reset scroll so the mobile header's safe-area
   // padding settles immediately after the sidebar/header render, instead of only
   // once the book grid fills in (old WebViews report env(safe-area-inset-*) as 0
@@ -87,9 +106,10 @@ document.addEventListener('app:network-restored', fetchAndShowVersion);
     void document.body.offsetHeight; // reflow nudge
   });
   await initRouter({
-    library:  initLibrary,
-    settings: initSettings,
-    opds:     initOpds,
+    library:   initLibrary,
+    settings:  initSettings,
+    opds:      initOpds,
+    bookorbit: initBookorbit,
   });
 })();
 

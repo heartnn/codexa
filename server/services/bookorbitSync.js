@@ -44,29 +44,33 @@ function toWebStyle(s) {
 
 // ── settings / context ────────────────────────────────────────────────────────
 // BookOrbit's KOSync progress lives at <base>/api/v1/koreader; the web API is its
-// sibling at <base>/api/v1. Derive the web base from the configured kosync URL.
-function webBaseFromKosyncUrl(kosyncUrl) {
-  let u = String(kosyncUrl || '').replace(/\/+$/, '');
+// sibling at <base>/api/v1. Derive the web base from the configured BookOrbit URL
+// (still tolerate a pasted koreader-plugin URL or a bare host, for forgiveness).
+function normalizeBookorbitUrl(bookorbitUrl) {
+  let u = String(bookorbitUrl || '').replace(/\/+$/, '');
   if (!u) return '';
   u = u.replace(/\/koreader$/, '');
   if (!/\/api\/v\d+$/.test(u)) u += '/api/v1';
   return u;
 }
 
-function getContext(userId) {
+// ignoreEnabled lets the settings-page "test connection" button verify credentials
+// before the user has flipped the enabled toggle on.
+function getContext(userId, { ignoreEnabled = false } = {}) {
   const db = getDb();
   const s = db.prepare(
-    'SELECT kosync_url, kosync_username, kosync_password_enc, bookorbit_sync_enabled, bookorbit_account_username, bookorbit_account_password_enc FROM user_settings WHERE user_id = ?'
+    'SELECT bookorbit_url, kosync_url, kosync_username, kosync_password_enc, bookorbit_sync_enabled, bookorbit_account_username, bookorbit_account_password_enc FROM user_settings WHERE user_id = ?'
   ).get(userId);
-  if (!s || s.bookorbit_sync_enabled !== 1) return null;
-  if (!s.kosync_url || !s.bookorbit_account_username || !s.bookorbit_account_password_enc) return null;
-  const webBase = webBaseFromKosyncUrl(s.kosync_url);
+  if (!s || (!ignoreEnabled && s.bookorbit_sync_enabled !== 1)) return null;
+  if (!s.bookorbit_url || !s.bookorbit_account_username || !s.bookorbit_account_password_enc) return null;
+  const webBase = normalizeBookorbitUrl(s.bookorbit_url);
   if (!webBase) return null;
   let origin;
   try { origin = new URL(webBase).origin; } catch { return null; }
-  // KOReader sync sub-account (x-auth-key) — used only to resolve book ids by file
-  // hash via /plugin/match-check. Optional; OPDS-link mapping is the fallback.
-  const koreaderBase = String(s.kosync_url).replace(/\/+$/, '');
+  // KOReader sync sub-account (x-auth-key) — used only to resolve book ids by file hash via
+  // /plugin/match-check, entirely optional (OPDS-link mapping is the fallback) and configured
+  // independently under KOReader Sync, not required for BookOrbit extended sync to work at all.
+  const koreaderBase = String(s.kosync_url || '').replace(/\/+$/, '');
   const koreaderUser = s.kosync_username || '';
   const koreaderKey = s.kosync_password_enc
     ? crypto.createHash('md5').update(String(s.kosync_password_enc)).digest('hex')
@@ -82,6 +86,36 @@ function isEnabled(userId) {
   return getContext(userId) !== null;
 }
 
+// ── reachability tracking (in-memory, updated as a side effect of every real
+// login()/api() call — no dedicated polling needed) ───────────────────────────
+const lastStatus = new Map(); // userId -> { ok, error, at }
+
+function recordStatus(userId, ok, error) {
+  lastStatus.set(userId, { ok, error: ok ? null : (error || 'unknown error'), at: Date.now() });
+}
+
+// Passive: report the outcome of the most recent call, without making a new request.
+// Used by the reader after a chapter/manual push, where an extra round-trip to BookOrbit
+// itself would add latency — reachable is null (unknown) until any call has been attempted.
+function getLastStatus(userId) {
+  const ctx = getContext(userId);
+  if (!ctx) return { enabled: false, reachable: null };
+  const st = lastStatus.get(userId);
+  if (!st) return { enabled: true, reachable: null };
+  return { enabled: true, reachable: st.ok, error: st.error, checkedAt: st.at };
+}
+
+// Active: actually attempt to reach BookOrbit right now (used by the settings "test
+// connection" button and the sidebar's once-per-load health check).
+async function checkReachable(userId, opts = {}) {
+  const ctx = getContext(userId, opts);
+  if (!ctx) return { enabled: false, reachable: null };
+  try { if (!tokens.has(userId)) await login(userId, ctx); }
+  catch (e) { return { enabled: true, reachable: false, error: e.message }; }
+  const r = await api(userId, ctx, 'GET', '/libraries');
+  return { enabled: true, reachable: r.ok, error: r.ok ? null : (r.error || `HTTP ${r.status}`) };
+}
+
 // ── auth (in-memory token jar per user) ───────────────────────────────────────
 const tokens = new Map(); // userId -> { access, refresh }
 
@@ -94,20 +128,31 @@ function extractToken(setCookies, name) {
 }
 
 async function login(userId, ctx) {
-  const res = await fetch(`${ctx.webBase}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ username: ctx.username, password: ctx.password }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res;
+  try {
+    res = await fetch(`${ctx.webBase}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ username: ctx.username, password: ctx.password }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    recordStatus(userId, false, err.message);
+    throw err;
+  }
   if (!res.ok) {
+    recordStatus(userId, false, `HTTP ${res.status}`);
     throw new Error(`login failed HTTP ${res.status}`);
   }
   const setCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
   const access = extractToken(setCookies, 'access_token');
   const refresh = extractToken(setCookies, 'refresh_token');
-  if (!access) throw new Error('login returned no access_token cookie');
+  if (!access) {
+    recordStatus(userId, false, 'login returned no access_token cookie');
+    throw new Error('login returned no access_token cookie');
+  }
   tokens.set(userId, { access, refresh });
+  recordStatus(userId, true);
 }
 
 async function refresh(userId, ctx) {
@@ -143,6 +188,7 @@ async function api(userId, ctx, method, path, body, state = { refreshed: false, 
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
+    recordStatus(userId, false, err.message);
     return { ok: false, status: 0, error: err.message };
   }
   if (res.status === 401 && !state.refreshed) {
@@ -161,8 +207,13 @@ async function api(userId, ctx, method, path, body, state = { refreshed: false, 
   }
   if (!res.ok) {
     console.warn(`[bookorbit] ${method} ${path} -> HTTP ${res.status}`);
+    // A request-specific error (403 permission, 404, validation, etc.) isn't a reachability
+    // problem — BookOrbit clearly answered. Only network failures/timeouts (handled above)
+    // and outright server errors count as "unreachable" for the health indicator.
+    recordStatus(userId, res.status < 500, res.status >= 500 ? `HTTP ${res.status}` : null);
     return { ok: false, status: res.status, data };
   }
+  recordStatus(userId, true);
   return { ok: true, status: res.status, data };
 }
 
@@ -241,6 +292,13 @@ function saveMapping(db, userId, bookId, boBookId, boFileId) {
     ON CONFLICT (user_id, book_id) DO UPDATE SET bo_book_id = excluded.bo_book_id, bo_file_id = excluded.bo_file_id
   `).run(userId, bookId, boBookId, boFileId || null);
   return db.prepare('SELECT * FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(userId, bookId);
+}
+
+// Public wrapper for saveMapping — used by the BookOrbit library-browser import route to
+// record a freshly-downloaded book as already-owned (bo_book_id/bo_file_id), so subsequent
+// browses and the background sync engine both recognize it immediately.
+function mapLocalBook(userId, bookId, boBookId, boFileId) {
+  return saveMapping(getDb(), userId, bookId, boBookId, boFileId);
 }
 
 // Resolve the BookOrbit ids for the requested local books: cached first, then a
@@ -556,6 +614,14 @@ async function runSync(userId, opts = {}) {
   if (running.has(userId)) return;
   const ctx = getContext(userId);
   if (!ctx) return;
+  // Ephemeral peek rows (server/utils/peekCleanup.js) are never mapped into BookOrbit and never
+  // will be — skip silently instead of doing a doomed lookup that just logs "not in your
+  // BookOrbit library" noise. Centralized here (rather than at each triggerSync call site —
+  // books.js's /opened, annotations.js, bookmarks.js) so it covers all of them.
+  if (opts.bookId != null) {
+    const peek = getDb().prepare('SELECT peek_expires_at FROM books WHERE id = ?').get(opts.bookId);
+    if (peek?.peek_expires_at) return;
+  }
   running.add(userId);
   const username = getDb().prepare('SELECT username FROM users WHERE id = ?').get(userId)?.username || `user${userId}`;
   // Tag every log line emitted by this background sweep with the user it runs for.
@@ -598,14 +664,43 @@ function triggerSync(userId, bookId) {
   setImmediate(() => { runSync(userId, bookId != null ? { bookId } : {}).catch(() => {}); });
 }
 
+// ── live progress push (session-independent) ──────────────────────────────────
+// Pushes just the current reading percentage via BookOrbit's own SaveProgressDto
+// endpoint (POST /books/files/:fileId/progress) — unlike uploadSessions(), this
+// doesn't wait for a closed reading_sessions row, so it can fire on every chapter
+// change / manual KOSync push, not just when the reader is closed.
+async function pushProgress(userId, bookId, percentage) {
+  const ctx = getContext(userId);
+  if (!ctx) return;
+  const db = getDb();
+  const resolved = await resolveBooks(db, userId, ctx, { bookId });
+  const m = resolved[0];
+  if (!m || !m.boFileId) return;
+  try { if (!tokens.has(userId)) await login(userId, ctx); }
+  catch { return; }
+  const pct = Math.max(0, Math.min(100, Math.round(percentage * 10000) / 100));
+  await api(userId, ctx, 'POST', `/books/files/${m.boFileId}/progress`, { percentage: pct });
+}
+
+function triggerProgressPush(userId, bookId, percentage) {
+  setImmediate(() => { pushProgress(userId, bookId, percentage).catch(() => {}); });
+}
+
 module.exports = {
   runSync,
   triggerSync,
   isEnabled,
   getContext,
-  webBaseFromKosyncUrl,
+  normalizeBookorbitUrl,
   parseBoIds,
   VALID_STATUS,
   getRecommendations,
   getCover,
+  api,
+  fetchAsset,
+  mapLocalBook,
+  pushProgress,
+  triggerProgressPush,
+  getLastStatus,
+  checkReachable,
 };
