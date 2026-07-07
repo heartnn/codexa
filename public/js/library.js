@@ -228,7 +228,7 @@ function _makeCard(book, globalIndex, isEink) {
     <div class="book-cover-area">
       ${cover}
       ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
-      <a class="book-card-peek-btn" href="/readerv4.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
+      <a class="book-card-peek-btn" href="/reader.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
     </div>
     <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
       <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
@@ -284,7 +284,7 @@ function _makeCard(book, globalIndex, isEink) {
       card.classList.add('tapped');
       return;
     }
-    window.location.href = `/readerv4.html?id=${book.id}`;
+    window.location.href = `/reader.html?id=${book.id}`;
     sessionStorage.setItem('br_last_shelf', String(currentShelfId));
     sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
   });
@@ -293,7 +293,7 @@ function _makeCard(book, globalIndex, isEink) {
     e.stopPropagation();
     sessionStorage.setItem('br_last_shelf', String(currentShelfId));
     sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
-    window.location.href = `/readerv4.html?id=${book.id}`;
+    window.location.href = `/reader.html?id=${book.id}`;
   });
 
   card.querySelector('.info-btn').addEventListener('click', e => {
@@ -562,7 +562,7 @@ function openCardMenu(book, btn) {
       <img src="/images/read.svg" class="nav-icon bcm-icon nav-icon-read" alt="">
       ${t('library.btn_read')}
     </button>
-    <a class="bcm-item" href="/readerv4.html?id=${book.id}&peek=1">
+    <a class="bcm-item" href="/reader.html?id=${book.id}&peek=1">
       <img src="/images/peek.svg" class="nav-icon bcm-icon nav-icon-peek" alt="">
       ${t('library.btn_peek')}
     </a>
@@ -608,7 +608,7 @@ function openCardMenu(book, btn) {
     sessionStorage.setItem('br_last_shelf', String(currentShelfId));
     sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
     closeCardMenu();
-    window.location.href = `/readerv4.html?id=${book.id}`;
+    window.location.href = `/reader.html?id=${book.id}`;
   });
 
   popup.querySelector('.bcm-info').addEventListener('click', () => {
@@ -753,8 +753,8 @@ export async function openInfoModal(book, startTab = '') {
           ${fullBook.series_name ? `<div class="info-modal-series"><button class="series-filter-btn" data-series="${escHtml(fullBook.series_name)}" title="${t('library.series_filter_title')}">${escHtml(fullBook.series_name)}${fullBook.series_number ? ` #${escHtml(fullBook.series_number)}` : ''}</button></div>` : ''}
           ${fullBook.genres ? `<div class="info-modal-genres" style="margin-top:.3rem">${fullBook.genres.split(',').map(g => g.trim()).filter(Boolean).map(g => `<span class="genre-pill">${escHtml(g)}</span>`).join('')}</div>` : ''}
           <div class="info-modal-actions">
-            <a class="imt-action-btn imt-btn-read" href="/readerv4.html?id=${fullBook.id}" title="${t('library.btn_read')}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt="${t('library.btn_read')}"></a>
-            <a class="imt-action-btn" href="/readerv4.html?id=${fullBook.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
+            <a class="imt-action-btn imt-btn-read" href="/reader.html?id=${fullBook.id}" title="${t('library.btn_read')}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt="${t('library.btn_read')}"></a>
+            <a class="imt-action-btn" href="/reader.html?id=${fullBook.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
             ${isOfflineSupported && !isOfflineMode ? (downloadedIds.has(fullBook.id)
               ? `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_delete_offline')}"><img src="/images/delete_offline.svg" class="nav-icon nav-icon-delete-offline" alt="${t('library.btn_delete_offline')}"></button>`
               : `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_download_offline')}"><img src="/images/download_offline.svg" class="nav-icon nav-icon-download-offline" alt="${t('library.btn_download_offline')}"></button>`) : ''}
@@ -1248,7 +1248,7 @@ export async function openInfoModal(book, startTab = '') {
               <span class="imt-reading-pct">${Math.round(bm.pct * 100)}%</span>
               <span class="imt-reading-text">${escHtml(label)}</span>
               <a class="btn btn-secondary btn-xs imt-jump-btn"
-                href="/readerv4.html?id=${fullBook.id}&peek=1&jumpcfi=${encodeURIComponent(bm.cfi)}"
+                href="/reader.html?id=${fullBook.id}&peek=1&jumpcfi=${encodeURIComponent(bm.cfi)}"
                 title="${t('library.btn_jump')}">${t('library.btn_jump')}</a>
               <button class="imt-del-btn" data-type="bookmarks" data-id="${bm.id}" title="${t('common.delete')}">×</button>
             </div>`;}).join('')
@@ -1264,7 +1264,7 @@ export async function openInfoModal(book, startTab = '') {
               <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${{ yellow: '#f5c518', green: '#4caf50', blue: '#2196f3', pink: '#e91e63' }[a.color] || '#f5c518'};flex-shrink:0"></span>
               <span class="imt-reading-text">${escHtml(a.text || '')}${a.note ? `<em class="imt-reading-note"> — ${escHtml(a.note)}</em>` : ''}</span>
               <a class="btn btn-secondary btn-xs imt-jump-btn"
-                href="/readerv4.html?id=${fullBook.id}&peek=1&jumpcfi=${encodeURIComponent(a.cfi)}"
+                href="/reader.html?id=${fullBook.id}&peek=1&jumpcfi=${encodeURIComponent(a.cfi)}"
                 title="${t('library.btn_jump')}">${t('library.btn_jump')}</a>
               <button class="imt-del-btn" data-type="annotations" data-id="${a.id}" title="${t('common.delete')}">×</button>
             </div>`).join('')
@@ -1927,7 +1927,7 @@ async function loadBooks() {
       const lastRead = books
         .filter(b => (b.percentage || 0) > 0 && (b.percentage || 0) < 1 && b.progress_updated_at)
         .sort((a, b) => b.progress_updated_at - a.progress_updated_at)[0];
-      if (lastRead) { sessionStorage.setItem('br_last_shelf', String(currentShelfId)); window.location.href = `/readerv4.html?id=${lastRead.id}`; return; }
+      if (lastRead) { sessionStorage.setItem('br_last_shelf', String(currentShelfId)); window.location.href = `/reader.html?id=${lastRead.id}`; return; }
     }
     // Refresh offline state, then auto-download currently-reading books silently
     await refreshDownloadedIds();
@@ -2114,7 +2114,7 @@ function initGridKeyboard() {
         } else {
           sessionStorage.setItem('br_last_shelf', String(currentShelfId));
           sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
-          window.location.href = `/readerv4.html?id=${id}`;
+          window.location.href = `/reader.html?id=${id}`;
         }
         break;
       }
@@ -2199,7 +2199,7 @@ async function checkInterruptedSession() {
       } catch { /* quota */ }
     }
     banner.remove();
-    window.location.href = `/readerv4.html?id=${session.bookId}`;
+    window.location.href = `/reader.html?id=${session.bookId}`;
   });
   document.getElementById('session-dismiss-btn').addEventListener('click', () => {
     try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
@@ -2208,11 +2208,11 @@ async function checkInterruptedSession() {
 }
 
 // Grid density (compact/normal/large) — shared across every book-card grid in the app (main
-// library + BookOrbit) so the size picked in one place is exactly the size shown everywhere
-// else. Deliberately NOT inside initLibrary(): panels init lazily on first visit (router.js),
-// so a session that lands directly on the BookOrbit panel (deep link / restored history state)
-// would never run initLibrary() at all, leaving BookOrbit's own density buttons unwired. Called
-// once, unconditionally, from app.js's boot sequence instead.
+// library + BookOrbit + OPDS) so the size picked in one place is exactly the size shown
+// everywhere else. Deliberately NOT inside initLibrary(): panels init lazily on first visit
+// (router.js), so a session that lands directly on the BookOrbit/OPDS panel (deep link /
+// restored history state) would never run initLibrary() at all, leaving that panel's own
+// density buttons unwired. Called once, unconditionally, from app.js's boot sequence instead.
 let _gridDensityInitialized = false;
 export function initGridDensityToggle() {
   if (_gridDensityInitialized) return;
@@ -2220,7 +2220,7 @@ export function initGridDensityToggle() {
 
   let gridDensity = localStorage.getItem('br_grid_density') || 'normal';
   function applyGridDensity() {
-    document.querySelectorAll('#book-grid, #bookorbit-grid').forEach(grid => {
+    document.querySelectorAll('#book-grid, #bookorbit-grid, #opds-book-grid').forEach(grid => {
       grid.classList.remove('density-compact', 'density-normal', 'density-large');
       grid.classList.add('density-' + gridDensity);
     });

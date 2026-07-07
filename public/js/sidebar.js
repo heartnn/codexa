@@ -21,6 +21,7 @@ let _downloadedCount  = 0;
 let _shelfEditMode    = false;
 let _bookorbitVisible = false;
 let _bookorbitWarning = false;
+let _opdsVisible      = false;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,11 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
   apiFetch('/settings').then(s => {
     setBookorbitNavVisible(!!s.bookorbit_sync_enabled);
     if (s.bookorbit_sync_enabled) checkBookorbitHealth();
+  }).catch(() => {});
+
+  // Online library nav item — only worth showing once at least one OPDS server exists.
+  apiFetch('/opds/servers').then(servers => {
+    setOpdsNavVisible(servers.length > 0);
   }).catch(() => {});
 
   // Username
@@ -240,6 +246,20 @@ export function setBookorbitNavVisible(visible) {
   if (el) el.style.display = _bookorbitVisible ? '' : 'none';
 }
 
+export function setOpdsNavVisible(visible) {
+  _opdsVisible = !!visible;
+  const el = document.getElementById('nav-opds');
+  if (el) el.style.display = _opdsVisible ? '' : 'none';
+}
+
+// Keeps the "Online library" nav item in sync when servers are added/edited/removed in Settings
+// (see settings.js's notifyOpdsServersChanged) without requiring a full page reload.
+document.addEventListener('opdsserverschanged', () => {
+  apiFetch('/opds/servers').then(servers => {
+    setOpdsNavVisible(servers.length > 0);
+  }).catch(() => {});
+});
+
 // Small warning badge on the BookOrbit nav item when it's enabled but unreachable —
 // survives sidebar re-renders (langchange) since _bookorbitWarning is module state.
 export function setBookorbitWarning(show) {
@@ -305,7 +325,7 @@ function buildSidebarHtml() {
         <span class="sidebar-item-label">${t('sidebar.bookorbit')}</span>
         <span class="sidebar-item-warning hidden" id="nav-bookorbit-warning" title="${t('sidebar.bookorbit_unreachable')}">⚠</span>
       </a>
-      <a href="/?panel=opds" class="sidebar-item" id="nav-opds">
+      <a href="/?panel=opds" class="sidebar-item" id="nav-opds" style="${_opdsVisible ? '' : 'display:none'}">
         <span class="sidebar-item-icon"><img src="/images/online_library.svg" class="nav-icon nav-icon-online-library" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.online_library')}</span>
       </a>

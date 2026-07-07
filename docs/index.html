@@ -90,6 +90,7 @@
             <li><a href="#opds-start"    data-section="opds" data-scroll="opds-start">Getting Started</a></li>
             <li><a href="#opds-browse"   data-section="opds" data-scroll="opds-browse">Browsing</a></li>
             <li><a href="#opds-download" data-section="opds" data-scroll="opds-download">Downloading</a></li>
+            <li><a href="#opds-peek"     data-section="opds" data-scroll="opds-peek">Peek Without Downloading</a></li>
             <li><a href="#opds-sync"     data-section="opds" data-scroll="opds-sync">Folder Sync to Shelf</a></li>
             <li><a href="#opds-linked"   data-section="opds" data-scroll="opds-linked">Linked Shelves</a></li>
           </ul>
@@ -364,7 +365,7 @@
           <ul>
             <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
             <li><strong>Shelves</strong> — organise books into named collections</li>
-            <li><strong>Online library</strong> — browse OPDS catalogs from Calibre-Web, Book Orbit, Booklore, Komga, Kavita, and more</li>
+            <li><strong>Online library</strong> — browse OPDS catalogs from Calibre-Web, Book Orbit, Booklore, Komga, Kavita, and more, with a folder tree, card grid, grid density control, and per-server reachability status; download books or peek them read-only without downloading first</li>
             <li><strong>Bulk shelf sync</strong> — from OPDS folder with stale-book detection</li>
             <li><strong>OPDS-linked shelves</strong> — synced shelves remember their source folder; one click opens it in the OPDS browser or re-triggers a sync</li>
             <li><strong><a href="#bookorbit-library" data-section="bookorbit-library">Native BookOrbit library browser</a></strong> — browse libraries, smart scopes, collections, series, and authors on a self-hosted BookOrbit server; add books to Codexa or peek them without downloading</li>
@@ -1136,36 +1137,101 @@ data/<br>
       <h2 id="opds-start">Getting Started</h2>
       <p>
         OPDS (Open Publication Distribution System) is a standard catalog format supported by
-        Calibre-Web, BookOrbit, Booklore, Komga, Kavita, Ubooquity, Bookwyrm, and many other self-hosted 
-        book servers. There are also a number of public OPDS catalogs available online. To browse an OPDS 
+        Calibre-Web, BookOrbit, Booklore, Komga, Kavita, Ubooquity, Bookwyrm, and many other self-hosted
+        book servers. There are also a number of public OPDS catalogs available online. To browse an OPDS
         catalog, you must first add it as a server in Codexa.
       </p>
       <ol class="steps">
         <li>Go to <strong>Settings → OPDS Servers</strong> and add at least one server (name, URL, and optional credentials).</li>
-        <li>Open the <strong>Online library</strong> from the sidebar.</li>
-        <li>Select a server from the left pane to browse its catalog.</li>
+        <li>Open the <strong>Online library</strong> from the sidebar — it only appears once at least one server is configured.</li>
+        <li>The first server is selected automatically; its root folder loads right away.</li>
       </ol>
+      <div class="callout">
+        <strong>Server status</strong>
+        Every configured server is checked for reachability as soon as the panel opens, and shown
+        with a colored dot in the server list — green for reachable, red for unreachable — so you
+        don't have to click through each one to find out.
+      </div>
 
       <h2 id="opds-browse">Browsing</h2>
+      <p>
+        The layout mirrors the <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit
+        library</a> browser, adapted for OPDS's one real difference: catalogs nest into arbitrarily
+        deep folders, where BookOrbit's own sections are flat.
+      </p>
       <ul>
-        <li>Navigate folders by clicking on them — a breadcrumb trail shows your location.</li>
-        <li>Book covers and titles are shown in a grid. Click a book to see its details and download options.</li>
+        <li>
+          <strong>Left sidebar</strong> — the server list, and below it a folder tree for whichever
+          server is selected. Clicking a folder expands its subfolders directly underneath it,
+          indented one step further right, so the tree always shows exactly the path you're on —
+          no separate expand/collapse state to lose track of.
+        </li>
+        <li>
+          <strong>Breadcrumb &amp; Up button</strong> — shown above the catalog on the right. Both
+          stay in sync with the folder tree: clicking a breadcrumb segment or the Up button moves
+          the tree's highlighted row back up to match.
+        </li>
+        <li>
+          <strong>Right pane</strong> — subfolders are shown as clickable tiles; books in the
+          current folder are shown below them as a grid of cover cards. A folder containing only
+          books shows just the card grid, with no tile section at all.
+        </li>
+        <li>
+          <strong>Grid density</strong> — the same compact/normal/large control used by the main
+          library and BookOrbit, in the top-right of the toolbar. It's a single shared preference:
+          changing it here changes it everywhere.
+        </li>
         <li>If the server supports OpenSearch, a search box appears at the top of the catalog pane.</li>
-        <li>Paginated feeds are loaded automatically as you scroll.</li>
+        <li>On narrow screens, the sidebar collapses into an off-canvas drawer opened with the ☰ button.</li>
       </ul>
 
       <h2 id="opds-download">Downloading a Single Book</h2>
       <p>
-        Click any book in the catalog → click <strong>Add to library</strong>. The EPUB is saved to
-        your Codexa library immediately. Metadata (title, author, cover, series) is extracted
-        automatically.
+        Each book card shows different actions depending on whether it's already in your library:
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>State</th><th>Actions shown</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Not yet downloaded</td>
+              <td><strong>+</strong> (download into your library) and <strong>ℹ Info</strong></td>
+            </tr>
+            <tr>
+              <td>Already downloaded</td>
+              <td><strong>Read</strong>, <strong>Peek</strong> (bottom-right of the cover), and <strong>ℹ Info</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Clicking <strong>+</strong> downloads the book immediately — metadata (title, author,
+        cover, series) is extracted automatically, and the card switches to the downloaded state
+        in place. <strong>ℹ Info</strong> opens a full details dialog once the book is downloaded;
+        beforehand it opens a lighter preview (cover, title, author, and description) sourced
+        directly from the catalog entry, since that's all an OPDS server ever exposes for a book
+        you haven't downloaded yet.
+      </p>
+
+      <h2 id="opds-peek">Peek Without Downloading</h2>
+      <p>
+        The <strong>Peek</strong> button works even before you download a book — tap it on any
+        card and Codexa fetches the file into a temporary location, opens it read-only, and cleans
+        it up automatically as soon as you close the reader (closing sends you right back to the
+        same server and folder you were browsing). If the reader is closed abruptly instead of
+        normally — a crash or a force-quit — a background sweep on the server removes the
+        temporary file within a few hours regardless, so nothing is ever left behind.
+      </p>
+      <p>
+        If the book turns out to already be in your library, Peek (and Info) opens it directly
+        instead of fetching a second temporary copy.
       </p>
 
       <h2 id="opds-sync">Folder Sync to Shelf</h2>
       <p>
-        Navigate to any folder in the OPDS catalog and click <strong>Sync to Shelf</strong> button on top right side 
-        of the folder icon. This bulk-imports the entire folder into a Codexa shelf, keeping it in sync with the source
-        catalog.
+        Click the <strong>sync icon</strong> next to any folder — on a tile in the right pane, or
+        on its row in the left folder tree — to bulk-import the entire folder into a Codexa shelf,
+        keeping it in sync with the source catalog.
       </p>
       <ul>
         <li>A <strong>pre-flight count</strong> is shown before you confirm — so you know how many books will be downloaded.</li>

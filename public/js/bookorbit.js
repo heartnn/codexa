@@ -307,7 +307,7 @@ function renderPeekButton(coverWrapEl, book) {
   if (book.localBookId) {
     const link = document.createElement('a');
     link.className = 'bookorbit-card-peek-btn';
-    link.href = `/readerv4.html?id=${book.localBookId}&peek=1&from=bookorbit`;
+    link.href = `/reader.html?id=${book.localBookId}&peek=1&from=bookorbit`;
     link.title = t('opds.btn_peek');
     link.innerHTML = `<img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="">`;
     link.addEventListener('click', () => saveResumeState()); // let the reader send us back here on close
@@ -343,7 +343,7 @@ function renderPeekButton(coverWrapEl, book) {
           }),
         });
         saveResumeState(); // let the reader send us back here on close
-        window.location.href = `/readerv4.html?id=${result.id}&peek=1&from=bookorbit`;
+        window.location.href = `/reader.html?id=${result.id}&peek=1&from=bookorbit`;
       } catch (err) {
         toast.error(err.message);
         btn.disabled = false;

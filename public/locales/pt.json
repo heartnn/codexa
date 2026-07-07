@@ -495,6 +495,7 @@
   "opds.search_ph": "Pesquisar catálogo…",
   "opds.btn_search": "Pesquisar",
   "opds.servers_title": "Servidores OPDS",
+  "opds.drawer_toggle": "Explorar servidores e pastas",
   "opds.btn_add_server": "+ Adicionar",
   "opds.no_servers": "Nenhum servidor adicionado.",
   "opds.add_in_settings": "Adicionar nas definições →",

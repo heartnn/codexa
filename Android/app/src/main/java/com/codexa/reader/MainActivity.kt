@@ -215,7 +215,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isOnReader(): Boolean =
-        webView.url?.contains("/readerv4.html", ignoreCase = true) == true
+        webView.url?.contains("/reader.html", ignoreCase = true) == true
 
     private fun triggerNetworkRestoreSync() {
         runOnUiThread {
@@ -235,7 +235,7 @@ class MainActivity : AppCompatActivity() {
     private val onBackCallback = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
             val currentUrl = webView.url ?: ""
-            if (currentUrl.contains("/readerv4.html", ignoreCase = true)) {
+            if (currentUrl.contains("/reader.html", ignoreCase = true)) {
                 return
             }
             val now = System.currentTimeMillis()
@@ -352,13 +352,13 @@ class MainActivity : AppCompatActivity() {
                 super.onPageStarted(view, url, favicon)
                 volumeKeyModeEnabled = false
                 // Exit immersive mode when navigating away from reader
-                val isReader = url.contains("/readerv4.html", ignoreCase = true)
+                val isReader = url.contains("/reader.html", ignoreCase = true)
                 runOnUiThread { setImmersiveMode(isReader) }
             }
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-                val isReader = url.contains("/readerv4.html", ignoreCase = true)
+                val isReader = url.contains("/reader.html", ignoreCase = true)
                 runOnUiThread {
                     setImmersiveMode(isReader)
                     // Inject status bar height as --sat so older Chrome WebViews

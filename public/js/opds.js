@@ -8,18 +8,25 @@ import { showPanel } from './router.js';
 // ── State ─────────────────────────────────────────────────────────────────────
 let servers       = [];
 let currentServer = null;
-let navStack      = [];    // [{title, url, upUrl}]
+// [{title, url, upUrl, children}] — the single source of truth for breadcrumb, the "Up" button,
+// AND the left folder tree: navStack[i].children is the list of nav (folder) entries visible
+// when navStack[i] was browsed, i.e. exactly the sibling list shown under that depth in the
+// tree. Since the tree only ever shows ONE expanded path (the current breadcrumb), there is no
+// separate tree-expand state to keep in sync — it's derived straight from this array.
+let navStack      = [];
 let _lastFeed     = null;  // last rendered feed, for re-render on lang change
 let _initialized  = false;
 
 // Pagination state for current browse level
 let pageHistory    = [];  // stack of URLs for each page visited (index = page number - 1)
 let currentFeed    = null; // the last loaded feed (has .next, .entries etc.)
-let serverStatus   = {};  // id -> 'connected' | 'error' | null
+let serverHealth   = {};  // id -> { reachable, checkedAt } — from GET /opds/health, all servers
 
 // ── DOM refs (assigned in initOpds) ──────────────────────────────────────────
-let serverList, serverEmpty, catalogTitle, breadcrumb, catalogGrid, catalogEmpty,
-    catalogSearch, btnSearch, btnUp, loadingEl;
+let serverList, serverEmpty, folderTree, catalogTitle, breadcrumb,
+    catalogGrid, opdsWelcome, navTilesEl, bookGridEl, catalogEmpty,
+    catalogSearch, btnSearch, btnUp, loadingEl,
+    sidebarEl, drawerToggle, drawerClose, drawerOverlay;
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 function escHtml(s) {
@@ -32,15 +39,87 @@ function coverSrc(url, serverId) {
   return `/api/opds/cover?url=${encodeURIComponent(url)}&server=${serverId}&token=${encodeURIComponent(token)}`;
 }
 
+// ── Mobile off-canvas drawer (mirrors bookorbit.js's openDrawer/closeDrawer) ──
+function openDrawer() {
+  sidebarEl.classList.add('opds-drawer-open');
+  drawerOverlay.classList.add('visible');
+}
+function closeDrawer() {
+  sidebarEl.classList.remove('opds-drawer-open');
+  drawerOverlay.classList.remove('visible');
+}
+
+// ── Resume state (mirrors bookorbit.js's saveResumeState/restoreResumeState) ─
+// Lets closing a book found via OPDS come back to the same server/folder instead of the
+// default library view (reader_v4.js reads ?from=opds the same way it already reads
+// ?from=bookorbit).
+const RESUME_KEY = 'br_opds_resume';
+
+function saveResumeState() {
+  if (!currentServer) return;
+  try {
+    sessionStorage.setItem(RESUME_KEY, JSON.stringify({
+      serverId: currentServer.id,
+      path: navStack.map(l => ({ title: l.title, url: l.url })),
+    }));
+  } catch { /* ignore */ }
+}
+
+// One-shot: restores server + breadcrumb path and re-browses the current (last) level. Ancestor
+// levels' folder-tree rows stay empty until the user visits them via Up/breadcrumb (which
+// re-fetches and populates .children then) — re-fetching every ancestor up front just to fill in
+// the tree isn't worth a cascade of extra requests on every resume.
+async function restoreResumeState() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null'); } catch { saved = null; }
+  sessionStorage.removeItem(RESUME_KEY);
+  if (!saved || !Array.isArray(saved.path) || !saved.path.length) return false;
+
+  const server = servers.find(s => s.id === saved.serverId);
+  if (!server) return false;
+
+  currentServer = server;
+  navStack = saved.path.map(l => ({ title: l.title, url: l.url, upUrl: null, children: null }));
+  renderServerList();
+
+  // The tree renders by recursing from depth 0 down through each level's .children — a single
+  // missing link anywhere in that chain (every ancestor starts as null right after a resume)
+  // hides the *entire* tree, not just that one level. Fetch every ancestor's sibling list in
+  // parallel so the chain is unbroken; the deepest level gets its .children (and the right-pane
+  // content) from the normal browseUrl call below.
+  const ancestors = navStack.slice(0, -1);
+  await Promise.all(ancestors.map(async level => {
+    try {
+      const params = level.url ? `?url=${encodeURIComponent(level.url)}` : '';
+      const feed = await apiFetch(`/opds/browse/${currentServer.id}${params}`);
+      level.children = feed.entries.filter(e => e.isNav);
+    } catch { /* leave children null — that row just won't show, the rest of the tree still will */ }
+  }));
+
+  await browseUrl(navStack[navStack.length - 1].url);
+  return true;
+}
+
 // ── Server list ───────────────────────────────────────────────────────────────
 async function loadServers() {
   try {
     servers = await apiFetch('/opds/servers');
     renderServerList();
-    if (servers.length > 0) openServer(servers[0]);
+    checkServerHealth(); // fire-and-forget — colors the list once results arrive
   } catch (err) {
     toast.error(t('opds.err_load_servers', { msg: err.message }));
   }
+}
+
+// Batch reachability check for every configured server (not just whichever one is open) —
+// mirrors BookOrbit's GET /bookorbit/health pattern.
+async function checkServerHealth() {
+  try {
+    serverHealth = await apiFetch('/opds/health');
+  } catch {
+    serverHealth = {};
+  }
+  renderServerList();
 }
 
 function renderServerList() {
@@ -50,11 +129,11 @@ function renderServerList() {
   servers.forEach(s => {
     const btn = document.createElement('button');
     const isActive = currentServer?.id === s.id;
-    const status   = isActive ? (serverStatus[s.id] || null) : null;
+    const health   = serverHealth[s.id];
     btn.className  = 'server-btn'
-      + (isActive           ? ' active'    : '')
-      + (status === 'connected' ? ' connected' : '')
-      + (status === 'error'     ? ' error'     : '');
+      + (isActive ? ' active' : '')
+      + (health?.reachable === true  ? ' reachable'   : '')
+      + (health?.reachable === false ? ' unreachable' : '');
     btn.innerHTML = `
       <span class="server-name">${escHtml(s.name)}</span>
     `;
@@ -66,19 +145,25 @@ function renderServerList() {
 // ── Browse ────────────────────────────────────────────────────────────────────
 async function openServer(server) {
   currentServer = server;
-  navStack      = [{ title: server.name, url: null }];
+  navStack      = [{ title: server.name, url: null, upUrl: null, children: null }];
   renderServerList();
-  const ok = await browseUrl(null);
-  // Store connection state so re-renders of the server list preserve it
-  serverStatus[server.id] = ok ? 'connected' : 'error';
-  renderServerList();
+  await browseUrl(null);
+}
+
+// Navigate into a nav (folder) entry that is a child of navStack[parentDepth]. Shared by both
+// the left folder tree's rows and the right pane's folder tiles, so both stay in sync — clicking
+// either one is exactly the same navigation.
+function navigateToFolder(entry, parentDepth) {
+  navStack = navStack.slice(0, parentDepth + 1);
+  navStack.push({ title: entry.title, url: entry.navHref, upUrl: null, children: null });
+  closeDrawer();
+  browseUrl(entry.navHref);
 }
 
 async function browseUrl(url) {
   setLoading(true);
-  catalogGrid.innerHTML = '';
-  catalogEmpty.hidden   = true;
-  catalogSearch.value   = '';
+  catalogEmpty.hidden = true;
+  catalogSearch.value = '';
   // Reset pagination when navigating to a new folder
   pageHistory = url !== undefined ? [url] : [null];
 
@@ -88,10 +173,13 @@ async function browseUrl(url) {
     currentFeed  = feed;
 
     if (navStack.length > 0) {
-      navStack[navStack.length - 1].title = feed.title || navStack[navStack.length - 1].title;
-      navStack[navStack.length - 1].upUrl = feed.up || null;
+      const level = navStack[navStack.length - 1];
+      level.title    = feed.title || level.title;
+      level.upUrl    = feed.up || null;
+      level.children = feed.entries.filter(e => e.isNav);
     }
     renderBreadcrumb();
+    renderFolderTree();
     renderFeed(feed);
     renderPagination();
     btnUp.disabled = !feed.up && navStack.length <= 1;
@@ -106,8 +194,7 @@ async function browseUrl(url) {
 
 async function gotoPage(url) {
   setLoading(true);
-  catalogGrid.innerHTML = '';
-  catalogEmpty.hidden   = true;
+  catalogEmpty.hidden = true;
   try {
     const params = url ? `?url=${encodeURIComponent(url)}` : '';
     const feed   = await apiFetch(`/opds/browse/${currentServer.id}${params}`);
@@ -119,6 +206,50 @@ async function gotoPage(url) {
   } finally {
     setLoading(false);
   }
+}
+
+// ── Folder tree (left sidebar, below the server list) ────────────────────────
+function renderFolderTree() {
+  folderTree.innerHTML = '';
+  if (!currentServer) return;
+  renderTreeLevel(0);
+}
+
+// Recursive: a child's own children (the next level down) must render directly beneath that
+// specific row — appending each level as a whole flat batch (all of level 0, then all of level
+// 1, ...) put every subfolder list at the very end regardless of which sibling was clicked.
+function renderTreeLevel(depth) {
+  const level = navStack[depth];
+  if (!level?.children) return; // not yet fetched (e.g. an ancestor left over from a resume)
+  const activeUrl = navStack[depth + 1]?.url ?? null;
+
+  level.children.forEach(entry => {
+    const isActive = entry.navHref === activeUrl;
+
+    const row = document.createElement('div');
+    row.className = 'opds-tree-row';
+    row.style.paddingLeft = `${Math.min(depth, 6) * 14}px`;
+
+    const item = document.createElement('button');
+    item.className = 'opds-tree-item' + (isActive ? ' active' : '');
+    item.innerHTML = `<img src="/images/folder.svg" class="nav-icon nav-icon-folder" alt=""><span class="opds-tree-name">${escHtml(entry.title)}</span>`;
+    item.addEventListener('click', () => navigateToFolder(entry, depth));
+    row.appendChild(item);
+
+    const syncBtn = document.createElement('button');
+    syncBtn.className = 'opds-tree-sync-btn';
+    syncBtn.title = t('opds.sync_title');
+    syncBtn.textContent = '⇅'; // icon-only, matching BookOrbit's .bookorbit-sublist-sync-btn
+    syncBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      openSyncModal(entry.navHref, entry.title);
+    });
+    row.appendChild(syncBtn);
+
+    folderTree.appendChild(row);
+
+    if (isActive) renderTreeLevel(depth + 1);
+  });
 }
 
 function renderPagination() {
@@ -165,18 +296,6 @@ function renderPagination() {
   bar.appendChild(nextBtn);
 }
 
-function showBookActions(actionsEl, bookId) {
-  actionsEl.innerHTML = `
-    <a class="btn btn-read btn-sm" href="/readerv4.html?id=${bookId}">${escHtml(t('opds.btn_read'))}</a>
-    <a class="btn btn-secondary btn-sm" href="/readerv4.html?id=${bookId}&peek=1">${escHtml(t('opds.btn_peek'))}</a>
-    <button class="btn btn-secondary btn-sm btn-opds-info">${escHtml(t('opds.btn_book_info'))}</button>
-  `;
-  actionsEl.querySelector('.btn-opds-info').addEventListener('click', e => {
-    e.stopPropagation();
-    openInfoModal({ id: bookId }).catch(() => {});
-  });
-}
-
 // Resolve a next URL that may be relative — use the last page URL as base
 function resolveClientUrl(href) {
   if (!href) return '';
@@ -185,103 +304,277 @@ function resolveClientUrl(href) {
   try { return new URL(href, base).href; } catch { return href; }
 }
 
-// Nav entries → folder tiles; book entries → expandable list rows
+// ── Right pane: folder tiles + book-card grid ────────────────────────────────
+// Nav entries → folder tiles (unchanged from before); book entries → a density-aware card grid
+// (replacing the old flat expandable .book-row list) mirroring bookorbit.js's card component.
 function renderFeed(feed) {
   _lastFeed = feed;
-  if (!feed.entries?.length) {
-    catalogEmpty.hidden = false;
+
+  const navEntries  = feed.entries?.filter(e => e.isNav)  || [];
+  const bookEntries = feed.entries?.filter(e => !e.isNav) || [];
+
+  opdsWelcome.hidden = true;
+  catalogEmpty.hidden = !!(navEntries.length || bookEntries.length);
+
+  // — Navigation tiles —
+  navTilesEl.hidden = navEntries.length === 0;
+  navTilesEl.innerHTML = '';
+  navEntries.forEach(entry => {
+    const tile = document.createElement('button');
+    tile.className = 'nav-tile';
+    tile.innerHTML = `<img src="/images/folder.svg" class="nav-icon nav-icon-folder" alt=""><span class="nav-tile-label">${escHtml(entry.title)}</span>
+      <button class="nav-tile-sync-btn" title="${t('opds.sync_title')}">${t('opds.btn_sync_short')}</button>`;
+    tile.addEventListener('click', (e) => {
+      if (e.target.closest('.nav-tile-sync-btn')) return;
+      navigateToFolder(entry, navStack.length - 1);
+    });
+    tile.querySelector('.nav-tile-sync-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      openSyncModal(entry.navHref, entry.title);
+    });
+    navTilesEl.appendChild(tile);
+  });
+
+  // — Book cards —
+  bookGridEl.hidden = bookEntries.length === 0;
+  bookGridEl.innerHTML = '';
+  bookEntries.forEach(entry => bookGridEl.appendChild(renderBookCard(entry)));
+}
+
+function coverPlaceholder() {
+  const ph = document.createElement('div');
+  ph.className = 'opds-card-cover opds-card-cover-ph';
+  ph.textContent = '📖';
+  return ph;
+}
+
+function renderBookCard(entry) {
+  const card = document.createElement('div');
+  card.className = 'opds-card';
+
+  const coverWrap = document.createElement('div');
+  coverWrap.className = 'opds-card-cover-wrap';
+
+  const imgSrc = coverSrc(entry.cover, currentServer.id);
+  if (imgSrc) {
+    const img = document.createElement('img');
+    img.className = 'opds-card-cover';
+    img.src = imgSrc;
+    img.loading = 'lazy';
+    img.alt = '';
+    img.addEventListener('error', () => img.replaceWith(coverPlaceholder()), { once: true });
+    coverWrap.appendChild(img);
+  } else {
+    coverWrap.appendChild(coverPlaceholder());
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'opds-card-actions';
+  coverWrap.appendChild(actions);
+  renderCardActions(actions, entry);
+
+  card.appendChild(coverWrap);
+
+  const info = document.createElement('div');
+  info.className = 'opds-card-info';
+  info.innerHTML = `
+    <div class="opds-card-title" title="${escHtml(entry.title)}">${escHtml(entry.title)}</div>
+    ${entry.author ? `<div class="opds-card-author">${escHtml(entry.author)}</div>` : ''}
+  `;
+  card.appendChild(info);
+
+  // Touch devices have no hover — first tap reveals the action icons instead.
+  card.addEventListener('click', e => {
+    if (e.target.closest('.opds-card-actions') || e.target.closest('.opds-card-peek-btn')) return;
+    if (!window.matchMedia('(pointer: coarse)').matches) return;
+    const wasTapped = card.classList.contains('tapped');
+    document.querySelectorAll('.opds-card.tapped').forEach(c => c.classList.remove('tapped'));
+    if (!wasTapped) card.classList.add('tapped');
+  });
+
+  return card;
+}
+
+// Always-visible peek icon, bottom-right of the cover — mirrors bookorbit.js's renderPeekButton:
+// a real link straight to the reader for an already-downloaded book, or (for a not-yet-downloaded
+// one) a button that fetches it into a short-lived ephemeral "books" row first (server:
+// createOpdsPeek in server/routes/opds.js — never lands in the permanent library, auto-cleaned on
+// close or by the background sweep, see server/utils/peekCleanup.js) then navigates to the same
+// read-only reader URL scheme.
+function renderPeekButton(coverWrapEl, entry) {
+  coverWrapEl.querySelector('.opds-card-peek-btn')?.remove();
+
+  if (entry.localBookId) {
+    const link = document.createElement('a');
+    link.className = 'opds-card-peek-btn';
+    link.href = `/reader.html?id=${entry.localBookId}&peek=1&from=opds`;
+    link.title = t('opds.btn_peek');
+    link.innerHTML = `<img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="">`;
+    link.addEventListener('click', () => saveResumeState());
+    coverWrapEl.appendChild(link);
     return;
   }
 
-  const navEntries  = feed.entries.filter(e => e.isNav);
-  const bookEntries = feed.entries.filter(e => !e.isNav);
-
-  // — Navigation tiles grid —
-  if (navEntries.length) {
-    const grid = document.createElement('div');
-    grid.className = 'nav-tile-grid';
-    navEntries.forEach(entry => {
-      const tile = document.createElement('button');
-      tile.className = 'nav-tile';
-      tile.innerHTML = `<img src="/images/folder.svg" class="nav-icon nav-icon-folder" alt=""><span class="nav-tile-label">${escHtml(entry.title)}</span>
-        <button class="nav-tile-sync-btn" title="${t('opds.sync_title')}">${t('opds.btn_sync_short')}</button>`;
-      tile.addEventListener('click', (e) => {
-        if (e.target.closest('.nav-tile-sync-btn')) return;
-        navStack.push({ title: entry.title, url: entry.navHref, upUrl: null });
-        browseUrl(entry.navHref);
-      });
-      tile.querySelector('.nav-tile-sync-btn').addEventListener('click', e => {
-        e.stopPropagation();
-        openSyncModal(entry.navHref, entry.title);
-      });
-      grid.appendChild(tile);
+  const btn = document.createElement('button');
+  btn.className = 'opds-card-peek-btn';
+  btn.innerHTML = `<img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="">`;
+  if (!entry.acqHref) {
+    btn.disabled = true;
+    btn.title = t('bookorbit.no_file');
+  } else {
+    btn.title = t('opds.btn_peek');
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      btn.disabled = true;
+      btn.classList.add('opds-btn-busy');
+      try {
+        const result = await apiFetch(`/opds/peek/${currentServer.id}`, {
+          method: 'POST',
+          body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
+        });
+        saveResumeState();
+        window.location.href = `/reader.html?id=${result.id}&peek=1&from=opds`;
+      } catch (err) {
+        toast.error(err.message);
+        btn.disabled = false;
+        btn.classList.remove('opds-btn-busy');
+      }
     });
-    catalogGrid.appendChild(grid);
+  }
+  coverWrapEl.appendChild(btn);
+}
+
+function renderCardActions(actionsEl, entry) {
+  actionsEl.innerHTML = '';
+  renderPeekButton(actionsEl.closest('.opds-card-cover-wrap'), entry);
+
+  if (entry.localBookId) {
+    const readBtn = document.createElement('a');
+    readBtn.className = 'btn-icon';
+    readBtn.href = `/reader.html?id=${entry.localBookId}&from=opds`;
+    readBtn.title = t('library.btn_read');
+    readBtn.innerHTML = `<img src="/images/read.svg" class="nav-icon nav-icon-read" alt="">`;
+    readBtn.addEventListener('click', () => saveResumeState());
+    actionsEl.appendChild(readBtn);
+
+    const infoBtn = document.createElement('button');
+    infoBtn.className = 'btn-icon';
+    infoBtn.title = t('opds.btn_book_info');
+    infoBtn.textContent = 'ℹ';
+    infoBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      openInfoModal({ id: entry.localBookId }).catch(() => {});
+    });
+    actionsEl.appendChild(infoBtn);
+    return;
   }
 
-  // — Book list rows —
-  bookEntries.forEach(entry => {
-    const row = document.createElement('div');
-    row.className = 'book-row';
-
-    const imgSrc = coverSrc(entry.cover, currentServer.id);
-    const thumbHtml = imgSrc
-      ? `<img class="book-row-thumb" src="${escHtml(imgSrc)}" alt="" loading="lazy" onerror="this.className='book-row-thumb book-row-no-cover'">`
-      : `<div class="book-row-thumb book-row-no-cover">📖</div>`;
-
-    row.innerHTML = `
-      <div class="book-row-main">
-        ${thumbHtml}
-        <div class="book-row-info">
-          <div class="book-row-title">${escHtml(entry.title)}</div>
-          ${entry.author ? `<div class="book-row-author">${escHtml(entry.author)}</div>` : ''}
-        </div>
-        <div class="book-row-actions">
-          ${entry.acqHref ? `<button class="btn btn-primary btn-sm btn-add" title="${escHtml(t('opds.btn_add'))}"><span class="btn-add-label">${escHtml(t('opds.btn_add'))}</span></button>` : ''}
-        </div>
-      </div>
-      <div class="book-row-detail" hidden>
-        ${entry.summary ? `<p class="book-row-summary">${escHtml(entry.summary)}</p>` : `<em>${t('opds.no_description')}</em>`}
-      </div>
-    `;
-
-    // Click row (not button) to expand/collapse details
-    row.querySelector('.book-row-main').addEventListener('click', e => {
-      if (e.target.closest('.book-row-actions')) return;
-      const detail = row.querySelector('.book-row-detail');
-      detail.hidden = !detail.hidden;
-      row.classList.toggle('expanded', !detail.hidden);
-    });
-
-    // Add to library
-    if (entry.acqHref) {
-      const btn = row.querySelector('.btn-add');
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        setButtonLoading(btn, true, t('opds.btn_downloading'));
-        try {
-          const data = await apiFetch(`/opds/download/${currentServer.id}`, {
-            method: 'POST',
-            body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
-          });
-          toast.success(t('opds.toast_book_added', { title: entry.title }));
-          showBookActions(row.querySelector('.book-row-actions'), data.id);
-          reloadLibrary().catch(e => console.error('[opds] reloadLibrary failed:', e));
-        } catch (err) {
-          const bookId = err.data?.id;
-          if (bookId) {
-            toast.info(t('opds.err_already_in_library'));
-            showBookActions(row.querySelector('.book-row-actions'), bookId);
-          } else {
-            toast.error(err.message);
-            setButtonLoading(btn, false, t('opds.btn_add'));
-          }
+  if (entry.acqHref) {
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'btn-icon';
+    dlBtn.title = t('opds.btn_add');
+    dlBtn.textContent = '+';
+    dlBtn.style.fontWeight = '700';
+    dlBtn.style.fontSize = '1.2rem';
+    dlBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      dlBtn.disabled = true;
+      dlBtn.classList.add('opds-btn-busy');
+      try {
+        const data = await apiFetch(`/opds/download/${currentServer.id}`, {
+          method: 'POST',
+          body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
+        });
+        toast.success(t('opds.toast_book_added', { title: entry.title }));
+        entry.localBookId = data.id;
+        renderCardActions(actionsEl, entry);
+        reloadLibrary().catch(e2 => console.error('[opds] reloadLibrary failed:', e2));
+      } catch (err) {
+        const bookId = err.data?.id;
+        if (bookId) {
+          toast.info(t('opds.err_already_in_library'));
+          entry.localBookId = bookId;
+          renderCardActions(actionsEl, entry);
+        } else {
+          toast.error(err.message);
+          dlBtn.disabled = false;
+          dlBtn.classList.remove('opds-btn-busy');
         }
-      });
-    }
+      }
+    });
+    actionsEl.appendChild(dlBtn);
+  }
 
-    catalogGrid.appendChild(row);
+  const infoBtn = document.createElement('button');
+  infoBtn.className = 'btn-icon';
+  infoBtn.title = t('opds.btn_book_info');
+  infoBtn.textContent = 'ℹ';
+  infoBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    openOpdsDetailModal(entry);
   });
+  actionsEl.appendChild(infoBtn);
+}
+
+// ── Lightweight detail modal (books not yet downloaded) ──────────────────────
+// Mirrors bookorbit.js's openBookorbitDetailModal, but needs no extra fetch or metadata grid —
+// an OPDS entry already carries everything it will ever have (title/author/summary/cover;
+// confirmed via normaliseAtomFeed/normaliseOpds2Feed in server/routes/opds.js). If the book is
+// already in the library, Info opens the full tabbed openInfoModal instead (see renderCardActions).
+function openOpdsDetailModal(entry) {
+  document.getElementById('opds-detail-modal')?.remove();
+  const imgSrc = coverSrc(entry.cover, currentServer.id);
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'opds-detail-modal';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal info-modal" role="dialog" aria-modal="true">
+      <button class="modal-close" id="ood-close" aria-label="${escHtml(t('common.close'))}">&times;</button>
+      <div class="info-modal-header">
+        <div class="info-modal-cover-wrap">
+          ${imgSrc
+            ? `<img class="info-modal-cover info-modal-cover-clickable" src="${escHtml(imgSrc)}" alt="" />`
+            : `<div class="info-modal-cover info-modal-cover-ph">\u{1F4D6}</div>`}
+        </div>
+        <div class="info-modal-hero">
+          <h3 class="info-modal-title">${escHtml(entry.title || '')}</h3>
+          <div class="info-modal-author">${escHtml(entry.author || t('library.unknown_author'))}</div>
+        </div>
+      </div>
+      <div class="info-modal-tab-content" style="max-height:40vh;overflow-y:auto">
+        ${entry.summary
+          ? `<div class="info-modal-desc">${escHtml(entry.summary)}</div>`
+          : `<div class="imt-empty">${t('opds.no_description')}</div>`}
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  const close = () => backdrop.remove();
+  backdrop.querySelector('#ood-close').addEventListener('click', close);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+  backdrop.querySelector('.info-modal-cover-clickable')?.addEventListener('click', e => {
+    e.stopPropagation();
+    openOpdsCoverPreview(imgSrc);
+  });
+}
+
+// Full-size cover preview — mirrors bookorbit.js's openBookorbitCoverPreview (itself a sibling of
+// library.js's openCoverPreview, which is hardwired to local books' /covers/:path).
+function openOpdsCoverPreview(imgSrc) {
+  if (!imgSrc) return;
+  document.getElementById('cover-preview-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cover-preview-overlay';
+  overlay.className = 'cover-preview-overlay';
+  overlay.innerHTML = `<img src="${escHtml(imgSrc)}" alt="" class="cover-preview-img" />`;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
@@ -325,18 +618,20 @@ async function doSearch() {
   if (!q || !currentServer) return;
 
   setLoading(true);
-  catalogGrid.innerHTML = '';
-  catalogEmpty.hidden   = true;
+  catalogEmpty.hidden = true;
 
   try {
     const feed = await apiFetch(`/opds/search/${currentServer.id}?q=${encodeURIComponent(q)}`);
     currentFeed  = feed;
     pageHistory  = [];  // search results are a single, non-pageable set
-    navStack = [
-      { title: currentServer.name, url: null },
-      { title: t('opds.search_crumb', { q }), url: null },
-    ];
+    // Append a synthetic search-crumb level on top of wherever the user already was, instead of
+    // replacing navStack outright — that used to wipe every real level's cached .children,
+    // leaving the folder tree blank until "Up" was pressed. Replace (not stack) an existing
+    // search-crumb if searching again while already in search mode.
+    const basePath = navStack[navStack.length - 1]?.isSearch ? navStack.slice(0, -1) : navStack;
+    navStack = [...basePath, { title: t('opds.search_crumb', { q }), url: null, upUrl: null, children: null, isSearch: true }];
     renderBreadcrumb();
+    renderFolderTree();
     renderFeed(feed);
     renderPagination();
     btnUp.disabled = false;
@@ -596,29 +891,37 @@ document.addEventListener('langchange', () => {
   if (!_initialized) return;
   applyTranslations();
   if (_lastFeed) {
-    catalogGrid.innerHTML = '';
     renderFeed(_lastFeed);
     renderPagination();
   }
-  // Note: do NOT call renderServerList() here — it would lose connected/error state
+  renderFolderTree();
+  // Note: do NOT call renderServerList() here — it would lose reachable/unreachable state
 });
 
 // ── OPDS servers changed (added / edited / deleted in Settings) ───────────────
 document.addEventListener('opdsserverschanged', async () => {
   if (!_initialized) return;
   try {
-    const updated = await apiFetch('/opds/servers');
-    // Drop status entries for removed servers
-    const updatedIds = new Set(updated.map(s => s.id));
-    for (const id of Object.keys(serverStatus)) {
-      if (!updatedIds.has(Number(id))) delete serverStatus[id];
-    }
-    servers = updated;
-    renderServerList();
+    servers = await apiFetch('/opds/servers');
+    // Re-check health from scratch rather than trying to prune the old map by id — server "id"
+    // is really just an array index, which shifts on delete, so pruning by stale id could
+    // silently misattribute a leftover health entry to the wrong server.
+    checkServerHealth();
     // If the current server was removed, open the first available one
     if (currentServer && !servers.find(s => s.id === currentServer.id)) {
-      if (servers.length > 0) openServer(servers[0]);
-      else { currentServer = null; catalogGrid.innerHTML = ''; navStack = []; renderBreadcrumb(); }
+      if (servers.length > 0) {
+        openServer(servers[0]);
+      } else {
+        currentServer = null;
+        navStack = [];
+        opdsWelcome.hidden = false;
+        navTilesEl.hidden = true;
+        bookGridEl.hidden = true;
+        renderBreadcrumb();
+        renderFolderTree();
+      }
+    } else {
+      renderServerList();
     }
   } catch { /* ignore */ }
 });
@@ -629,7 +932,10 @@ export async function openOpdsBrowserAtFolder(serverId, folderUrl) {
   const server = servers.find(s => s.id === parseInt(serverId, 10));
   if (!server) return;
   currentServer = server;
-  navStack = [{ title: server.name, url: null }, { title: '', url: folderUrl }];
+  navStack = [
+    { title: server.name, url: null, upUrl: null, children: null },
+    { title: '', url: folderUrl, upUrl: null, children: null },
+  ];
   renderServerList();
   browseUrl(folderUrl);
 }
@@ -641,14 +947,22 @@ export async function initOpds() {
 
   serverList    = document.getElementById('server-list');
   serverEmpty   = document.getElementById('server-empty');
+  folderTree    = document.getElementById('opds-folder-tree');
   catalogTitle  = document.getElementById('catalog-title');
   breadcrumb    = document.getElementById('breadcrumb');
   catalogGrid   = document.getElementById('catalog-grid');
+  opdsWelcome   = document.getElementById('opds-welcome');
+  navTilesEl    = document.getElementById('opds-nav-tiles');
+  bookGridEl    = document.getElementById('opds-book-grid');
   catalogEmpty  = document.getElementById('catalog-empty');
   catalogSearch = document.getElementById('catalog-search');
   btnSearch     = document.getElementById('btn-catalog-search');
   btnUp         = document.getElementById('btn-catalog-up');
   loadingEl     = document.getElementById('catalog-loading');
+  sidebarEl     = document.getElementById('opds-sidebar');
+  drawerToggle  = document.getElementById('opds-drawer-toggle');
+  drawerClose   = document.getElementById('opds-drawer-close');
+  drawerOverlay = document.getElementById('opds-drawer-overlay');
 
   btnUp.addEventListener('click', () => {
     if (navStack.length > 1) {
@@ -661,8 +975,16 @@ export async function initOpds() {
   btnSearch.addEventListener('click', doSearch);
   catalogSearch.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
-  document.getElementById('btn-opds-go-settings')?.addEventListener('click', () => showPanel('settings'));
-  document.querySelector('.btn-opds-settings-link')?.addEventListener('click', () => showPanel('settings'));
+  document.getElementById('btn-opds-go-settings')?.addEventListener('click', () => showPanel('settings', true, { tab: 'opds' }));
+  document.querySelector('.btn-opds-settings-link')?.addEventListener('click', () => showPanel('settings', true, { tab: 'opds' }));
+
+  drawerToggle.addEventListener('click', openDrawer);
+  drawerClose.addEventListener('click', closeDrawer);
+  drawerOverlay.addEventListener('click', closeDrawer);
 
   await loadServers();
+  if (!(await restoreResumeState()) && servers.length > 0) {
+    await openServer(servers[0]);
+  }
+  openDrawer(); // start open on mobile — nothing to browse yet until a server/folder is picked
 }

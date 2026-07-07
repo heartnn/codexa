@@ -2487,7 +2487,10 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
   padding: .75rem 1rem; border-bottom: 1px solid var(--color-border);
   font-weight: 600; font-size: .85rem; display: flex; justify-content: space-between; align-items: center;
 }
-#server-list { flex: 1; overflow-y: auto; padding: .4rem; }
+/* Sized to content (not flex:1) so the folder tree below it starts right after the last
+   server, not halfway down the sidebar — max-height + its own scroll caps it if there are many
+   servers. Mirrors .bookorbit-nav (fixed list) vs #bookorbit-sublist (flex:1, gets the rest). */
+#server-list { flex-shrink: 0; max-height: 240px; overflow-y: auto; padding: .4rem; }
 #server-empty { padding: 1rem; font-size: .8rem; color: var(--color-text-muted); text-align: center; }
 .server-btn {
   display: block; width: 100%; text-align: left; padding: .6rem .75rem;
@@ -2497,10 +2500,17 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 .server-btn:hover { background: var(--color-surface2); }
 .server-btn.active { background: var(--color-accent); color: #fff; }
 .server-btn.active .server-url { color: rgba(255,255,255,.7); }
-.server-btn.active.connected { background: #2a7a3b; }
-.server-btn.active.error { background: #8b1a1a; }
-.sidebar-layout[data-lib-theme="eink"] .server-btn.active.connected,
-.sidebar-layout[data-lib-theme="eink"] .server-btn.active.error { background: var(--color-accent); }
+/* Reachability dot — computed for every server via GET /opds/health, independent of which one
+   is currently selected/active (unlike the old click-derived connected/error state it replaces). */
+.server-btn.reachable .server-name::before,
+.server-btn.unreachable .server-name::before {
+  content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: .4rem; vertical-align: middle;
+}
+.server-btn.reachable .server-name::before { background: #2a9d4a; }
+.server-btn.unreachable .server-name::before { background: #c0392b; }
+.sidebar-layout[data-lib-theme="eink"] .server-btn.reachable .server-name::before,
+.sidebar-layout[data-lib-theme="eink"] .server-btn.unreachable .server-name::before { background: currentColor; }
 .server-name { display: block; font-size: .875rem; font-weight: 500; }
 .server-url { display: block; font-size: .72rem; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .opds-catalog { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -2542,30 +2552,6 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 .nav-tile:hover { border-color: var(--color-accent); background: var(--color-surface2); }
 .nav-tile-icon, .nav-tile > .nav-icon { font-size: 1.8rem; line-height: 1; }
 .nav-tile-label { font-size: .78rem; font-weight: 600; text-align: center; line-height: 1.3; }
-.book-row {
-  background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 7px; overflow: hidden; transition: border-color .15s; flex-shrink: 0;
-}
-.book-row:hover { border-color: var(--color-accent); }
-.book-row-main {
-  display: flex; align-items: center; gap: .6rem; padding: .5rem .75rem;
-  min-height: 62px; cursor: pointer; user-select: none;
-}
-.book-row-thumb {
-  width: 36px; height: 52px; object-fit: cover; border-radius: 3px;
-  flex-shrink: 0; background: var(--color-surface2);
-}
-.book-row-no-cover { display: flex; align-items: center; justify-content: center; font-size: 1.3rem; color: var(--color-text-muted); }
-.book-row-info { flex: 1; min-width: 0; }
-.book-row-title { font-size: .875rem; font-weight: 600; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.book-row-author { font-size: .75rem; color: var(--color-text-muted); margin-top: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.book-row-actions { flex-shrink: 0; }
-.book-row-detail {
-  padding: .5rem .75rem .75rem calc(36px + .6rem + .75rem);
-  border-top: 1px solid var(--color-border); font-size: .8rem; color: var(--color-text-muted); line-height: 1.5;
-}
-.book-row-summary { margin: 0; }
-.book-row.expanded { border-color: var(--color-accent); }
 #catalog-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--color-text-muted); }
 #catalog-empty { padding: 2rem; color: var(--color-text-muted); text-align: center; }
 #opds-pagination {
@@ -2591,19 +2577,142 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 .opds-page-info { font-size: .85rem; color: var(--color-text-muted); }
 .opds-welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--color-text-muted); gap: .5rem; }
 .opds-welcome .icon { font-size: 3rem; }
+/* .opds-welcome's own `display:flex` above is an author rule and outranks the UA stylesheet's
+   default `[hidden]{display:none}`, so toggling the hidden attribute alone did nothing — the
+   welcome message and the nav-tiles/book-grid it's supposed to be replaced by rendered at the
+   same time. Same fix applied to the other two persistent catalog-grid children. */
+.opds-welcome[hidden] { display: none; }
+#opds-nav-tiles[hidden] { display: none; }
+#opds-book-grid[hidden] { display: none; }
+
+/* ── OPDS folder tree (left sidebar, below the server list) ────────────────
+   Mirrors #bookorbit-sublist/.bookorbit-sublist-* exactly, since it's the same "nav list with
+   an inline sync button per row" idea — the one difference is real depth: OPDS folders nest, so
+   each row gets a `data-depth`-driven indent instead of being a flat single-level list. */
+#opds-folder-tree { flex: 1; overflow-y: auto; padding: .4rem; border-top: 1px solid var(--color-border); }
+.opds-tree-row { display: flex; align-items: center; gap: 2px; margin-bottom: 2px; }
+.opds-tree-item {
+  display: flex; align-items: center; gap: .4rem; flex: 1; min-width: 0; text-align: left; padding: .45rem .6rem;
+  border: none; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--color-text); font-size: .8rem; transition: background .15s;
+}
+.opds-tree-item:hover { background: var(--color-surface2); }
+.opds-tree-item.active { background: var(--color-accent); color: #fff; }
+.opds-tree-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.opds-tree-sync-btn {
+  flex-shrink: 0; border: none; background: none; cursor: pointer; border-radius: 6px;
+  padding: .3rem .45rem; color: var(--color-text-muted); font-size: .85rem; transition: background .15s, color .15s;
+}
+.opds-tree-sync-btn:hover { background: var(--color-surface2); color: var(--color-accent); }
+
+/* ── OPDS book-card grid (right pane, below any folder tiles) ──────────────
+   Sizing comes entirely from the shared .book-grid/.density-* classes (main.css ~line 601 and
+   public/js/library.js's applyGridDensity) — kept off this id rule for the same reason
+   #bookorbit-grid keeps it off (~line 2686 below): so it can't out-specificity the density
+   classes and end up a different card size than the main library/BookOrbit grids. This element
+   is static (present from page load, see public/index.html) rather than rebuilt per navigation,
+   so the density class applied to it survives each innerHTML replacement of its card children. */
+#opds-book-grid { align-content: start; }
+.opds-card { display: flex; flex-direction: column; min-width: 0; }
+.opds-card-cover-wrap { position: relative; }
+.opds-card-cover {
+  width: 100%; aspect-ratio: 2 / 3; border-radius: 6px; object-fit: cover; display: block;
+  background: var(--color-surface2); box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.opds-card-cover-ph { display: flex; align-items: center; justify-content: center; font-size: 2rem; opacity: .5; }
+.opds-card-info { padding: .6rem .75rem .75rem; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .3rem; }
+.opds-card-title {
+  font-size: .82rem; font-weight: 600; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.opds-card-author { font-size: .74rem; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.opds-card-actions {
+  display: none; position: absolute; top: .4rem; right: .4rem; left: .4rem; gap: .3rem;
+  flex-wrap: wrap; justify-content: flex-end;
+}
+.opds-card-cover-wrap:hover .opds-card-actions,
+.opds-card.tapped .opds-card-actions { display: flex; }
+.opds-card-actions .btn-icon {
+  background: rgba(0, 0, 0, 0.65); color: #fff; border-color: rgba(255, 255, 255, 0.4);
+  width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center;
+  font-size: .95rem;
+}
+.opds-card-actions .btn-icon:hover { background: rgba(180, 30, 30, 0.85); border-color: rgba(255, 255, 255, 0.7); color: #fff; }
+.opds-card-actions .btn-icon:disabled { opacity: .5; cursor: default; }
+.opds-card-actions .btn-icon:disabled:hover { background: rgba(0, 0, 0, 0.65); border-color: rgba(255, 255, 255, 0.4); }
+.opds-card-actions .btn-icon .nav-icon { filter: brightness(0) invert(1); width: 16px; height: 16px; }
+.opds-card-actions .btn-icon.opds-btn-busy { opacity: .6; }
+html[data-lib-theme="eink"] .opds-card-actions .btn-icon,
+.sidebar-layout[data-lib-theme="eink"] .opds-card-actions .btn-icon {
+  background: rgba(255, 255, 255, 0.92); color: #111; border-color: rgba(0, 0, 0, 0.55);
+}
+html[data-lib-theme="eink"] .opds-card-actions .btn-icon .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .opds-card-actions .btn-icon .nav-icon { filter: none; }
+
+/* Always-visible peek icon, bottom-right of the cover — mirrors .bookorbit-card-peek-btn (and
+   ultimately .book-card-peek-btn) exactly. */
+.opds-card-peek-btn {
+  position: absolute; bottom: 5px; right: 5px;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.60); border: 1px solid rgba(255, 255, 255, 0.35);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .15s; z-index: 2; text-decoration: none;
+}
+.opds-card-peek-btn .nav-icon { filter: brightness(0) invert(1); width: 14px; height: 14px; }
+.opds-card-cover-wrap:hover .opds-card-peek-btn,
+.opds-card.tapped .opds-card-peek-btn { opacity: 1; }
+.opds-card-cover-wrap:hover .opds-card-peek-btn.opds-btn-busy,
+.opds-card.tapped .opds-card-peek-btn.opds-btn-busy { opacity: .6; }
+.opds-card-peek-btn:disabled { cursor: default; }
+html[data-lib-theme="eink"] .opds-card-peek-btn,
+.sidebar-layout[data-lib-theme="eink"] .opds-card-peek-btn {
+  background: rgba(255, 255, 255, 0.90); border-color: rgba(0, 0, 0, 0.55);
+}
+html[data-lib-theme="eink"] .opds-card-peek-btn .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .opds-card-peek-btn .nav-icon { filter: none; }
+
+/* Drawer toggle/close controls only exist for the off-canvas mobile layout — inert on desktop,
+   where .opds-sidebar is always visible inline (see the @media block below). Mirrors BookOrbit's
+   drawer controls exactly (~line 2830). */
+.opds-drawer-toggle-btn {
+  display: none; flex-shrink: 0; border: none; background: none; cursor: pointer;
+  font-size: 1.1rem; padding: .3rem .5rem; color: var(--color-text); border-radius: 6px;
+}
+.opds-drawer-toggle-btn:hover { background: var(--color-surface2); }
+.opds-drawer-close-btn {
+  display: none; border: none; background: none; cursor: pointer; font-size: 1.3rem;
+  line-height: 1; color: var(--color-text-muted); padding: 0 .25rem;
+}
+#opds-drawer-overlay { display: none; }
+
 @media (max-width: 768px) {
   .app-body.opds-active { overflow-x: hidden; overflow-y: auto; }
   #panel-opds:not([hidden]) { overflow-x: hidden; overflow-y: auto; }
-  .opds-layout { flex-direction: column; height: auto; overflow-x: hidden; }
-  .opds-sidebar { width: 100%; min-width: 0; height: auto; border-right: none; border-bottom: 1px solid var(--color-border); }
-  #server-list { max-height: 140px; }
   .opds-catalog { overflow-x: hidden; overflow-y: visible; min-width: 0; max-width: 100%; }
   #catalog-grid { overflow: visible; min-width: 0; }
+  #opds-book-grid { overflow: visible; min-width: 0; } /* column sizing comes from .book-grid/.density-* */
   #catalog-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
   .nav-tile-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
-  .book-row-detail { padding-left: .75rem; }
   .opds-toolbar { flex-wrap: wrap; gap: .35rem; }
   #opds-pagination { flex-wrap: wrap; gap: .4rem; padding: .4rem .75rem; }
+
+  /* Off-canvas drawer for the server list + folder tree, replacing the old "always stacked
+     above the catalog" layout — mirrors BookOrbit's panel (~line 2900). */
+  .opds-drawer-toggle-btn { display: inline-flex; align-items: center; justify-content: center; }
+  #panel-opds .opds-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 210;
+    width: 85%; max-width: 320px; height: 100%;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    box-shadow: 2px 0 12px rgba(0,0,0,.3);
+  }
+  #panel-opds .opds-sidebar.opds-drawer-open { transform: translateX(0); }
+  .opds-drawer-close-btn { display: inline-block; }
+  #opds-drawer-overlay {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(0,0,0,.5); z-index: 205;
+  }
+  #opds-drawer-overlay.visible { display: block; }
 }
 @media (max-width: 480px) {
   .btn-add .btn-add-label { display: none; }
@@ -3032,8 +3141,8 @@ html[data-lib-theme="eink"] #edit-remove-btn,
 }
 
 /* Online library book cover thumbnails */
-html[data-lib-theme="eink"] .book-row-thumb,
-.sidebar-layout[data-lib-theme="eink"] .book-row-thumb,
+html[data-lib-theme="eink"] .opds-card-cover,
+.sidebar-layout[data-lib-theme="eink"] .opds-card-cover,
 html[data-lib-theme="eink"] .bookorbit-card-cover,
 .sidebar-layout[data-lib-theme="eink"] .bookorbit-card-cover { filter: grayscale(100%); }
 
@@ -3058,9 +3167,12 @@ html[data-lib-theme="eink"] .book-card-checkbox,
 .sidebar-layout[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
 .sidebar-layout[data-lib-theme="eink"] .book-card-checkbox { accent-color: #111; }
 
-/* Ensure spinners are greyscale in e-ink mode */
+/* No spinning animation on e-ink displays — matches .book-card's animation:none treatment
+   (~line 640). A spinning ring is wasted motion on a slow-refresh screen and can look like a
+   rendering glitch rather than a loading indicator, so hide it entirely rather than just
+   recoloring it. */
 html[data-lib-theme="eink"] .spinner,
-.sidebar-layout[data-lib-theme="eink"] .spinner { color: var(--color-text); }
+.sidebar-layout[data-lib-theme="eink"] .spinner { display: none; }
 
 /* ── Flexbox gap fallback (old WebView, ~Chrome 66–83) ─────────────────────────
    Flexbox `gap` only shipped in Chrome 84, so on the tested Android WebView it's
@@ -3075,7 +3187,6 @@ html.no-flexgap .sidebar-item            > * + * { margin-left: .6rem; }
 html.no-flexgap .sidebar-shelf-item      > * + * { margin-left: .6rem; }
 html.no-flexgap .sidebar-username-row    > * + * { margin-left: .25rem; }
 html.no-flexgap .sidebar-theme           > * + * { margin-top: .4rem; }
-html.no-flexgap .book-row-main           > * + * { margin-left: .6rem; }
 html.no-flexgap .opds-toolbar            > * + * { margin-left: .5rem; }
 html.no-flexgap .opds-search-row         > * + * { margin-left: .4rem; }
 html.no-flexgap .opds-shelf-banner-actions > * + * { margin-left: .4rem; }

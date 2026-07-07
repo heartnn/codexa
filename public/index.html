@@ -442,39 +442,55 @@
     <div id="panel-opds" class="app-panel" hidden>
       <div class="opds-layout">
 
-        <!-- Left pane: server list -->
-        <aside class="opds-sidebar">
+        <!-- Left pane: server list + folder tree. On mobile this becomes an off-canvas drawer
+             (see #opds-drawer-toggle / #opds-drawer-overlay) instead of permanently stacking
+             above the catalog view. -->
+        <aside class="opds-sidebar" id="opds-sidebar">
           <div class="opds-sidebar-header">
             <span data-i18n="opds.servers_title">OPDS strežniki</span>
             <button id="btn-opds-go-settings" class="btn btn-secondary btn-sm" style="font-size:.72rem;padding:.2rem .5rem" data-i18n="opds.btn_add_server">+ Dodaj</button>
+            <button id="opds-drawer-close" class="opds-drawer-close-btn" data-i18n-aria-label="common.close" aria-label="Zapri">&times;</button>
           </div>
           <div id="server-list"></div>
           <p id="server-empty" hidden>
             <span data-i18n="opds.no_servers">Ni dodanih strežnikov.</span><br>
             <button class="btn-link btn-opds-settings-link" data-i18n="opds.add_in_settings">Dodaj v nastavitvah →</button>
           </p>
+          <div id="opds-folder-tree"></div>
         </aside>
+        <div id="opds-drawer-overlay"></div>
 
         <!-- Right pane: catalog browser -->
         <div class="opds-catalog" style="position:relative">
           <div class="opds-toolbar">
+            <button id="opds-drawer-toggle" class="opds-drawer-toggle-btn" data-i18n-aria-label="opds.drawer_toggle" aria-label="Brskaj" data-i18n-title="opds.drawer_toggle" title="Brskaj">☰</button>
             <button id="btn-catalog-up" class="btn btn-secondary btn-sm" disabled data-i18n="opds.btn_up">↑ Gor</button>
             <span id="catalog-title"></span>
             <span id="breadcrumb"></span>
+            <div class="density-toggle" role="group" aria-label="Grid density">
+              <button class="density-btn" data-density="compact" data-i18n-title="library.density_compact" title="Kompaktno"><img src="/images/density_compact.svg" class="nav-icon nav-icon-density-compact" alt=""></button>
+              <button class="density-btn" data-density="normal"  data-i18n-title="library.density_normal"  title="Normalno"><img src="/images/density_normal.svg"  class="nav-icon nav-icon-density-normal"  alt=""></button>
+              <button class="density-btn" data-density="large"   data-i18n-title="library.density_large"   title="Veliko"><img src="/images/density_large.svg"   class="nav-icon nav-icon-density-large"   alt=""></button>
+            </div>
           </div>
           <div class="opds-search-row">
             <input type="search" id="catalog-search" data-i18n-placeholder="opds.search_ph" placeholder="Iščite po katalogu…" />
             <button id="btn-catalog-search" class="btn btn-primary btn-sm" data-i18n="opds.btn_search">Išči</button>
           </div>
           <div id="catalog-loading" hidden>
-            <span class="spinner"></span>
-            <span style="display:block;margin-top:.5rem;font-size:.85rem" data-i18n="opds.loading">Nalagam…</span>
+            <span style="font-size:.85rem" data-i18n="opds.loading">Nalagam…</span>
           </div>
           <div id="catalog-grid">
-            <div class="opds-welcome" style="grid-column:1/-1">
+            <!-- Hidden by default: at least one server is always auto-selected on open, so this
+                 would otherwise flash briefly under the loading state for no reason. Only ever
+                 shown if genuinely reached with a server but nothing browsed (should not happen
+                 in the normal flow — kept as a harmless fallback rather than removed outright). -->
+            <div class="opds-welcome" id="opds-welcome" style="grid-column:1/-1" hidden>
               <span class="icon">🔍</span>
               <span data-i18n="opds.welcome">Izberite OPDS streženik na levi strani</span>
             </div>
+            <div id="opds-nav-tiles" class="nav-tile-grid" hidden></div>
+            <div id="opds-book-grid" class="book-grid" hidden></div>
           </div>
           <p id="catalog-empty" hidden data-i18n="opds.no_results">Ni zadetkov.</p>
           <div id="opds-pagination" hidden></div>

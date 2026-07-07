@@ -34,10 +34,13 @@ if (!requireAuth()) throw new Error('not authenticated');
 const params = new URLSearchParams(window.location.search);
 const isPeekMode = params.get('peek') === '1';
 const bookId = params.get('id');
-// Peeking from the BookOrbit panel (public/js/bookorbit.js) tags the reader URL so closing sends
-// the user back to that panel (which restores its own last section/item/page/sort — see
-// bookorbit.js's saveResumeState/restoreResumeState) instead of the default library view.
-const libraryReturnUrl = params.get('from') === 'bookorbit' ? '/?panel=bookorbit' : '/';
+// Peeking/reading from the BookOrbit or OPDS panels (public/js/bookorbit.js, public/js/opds.js)
+// tags the reader URL so closing sends the user back to that panel (which restores its own last
+// section/item/page/server+folder — see each file's saveResumeState/restoreResumeState) instead
+// of the default library view.
+const libraryReturnUrl = params.get('from') === 'bookorbit' ? '/?panel=bookorbit'
+  : params.get('from') === 'opds' ? '/?panel=opds'
+  : '/';
 if (!bookId) { window.location.href = libraryReturnUrl; throw new Error(); }
 const BIONIC_RELOAD_KEY = 'br_bionic_reload_state_v1';
 const SESSION_KEY = 'br_interrupted_session_v1';

@@ -2032,7 +2032,7 @@ input.jump-pct-value-input {
 /* ── Flexbox gap fallback (old WebView, ~Chrome 66–83) ─────────────────────────
    Flexbox `gap` shipped in Chrome 84, so on the tested Android WebView it's ignored
    and the settings rows / header buttons / tab icons collapse together. A probe in
-   readerv4.html's <head> adds `.no-flexgap` to <html> when flex gap doesn't work;
+   reader.html's <head> adds `.no-flexgap` to <html> when flex gap doesn't work;
    these rules restore the spacing with margins. Modern engines never get the class,
    so their rendering is unchanged. Each rule mirrors the component's gap value.
    (`.setting-row-inline` / header rows use justify-content:space-between, which

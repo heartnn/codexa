@@ -169,7 +169,7 @@ export class ChapterRenderer {
     doc.querySelectorAll('source[src]').forEach(el => sub(el, 'src'));
   }
 
-  // True on the old Android WebViews flagged by the flex-gap probe in readerv4.html.
+  // True on the old Android WebViews flagged by the flex-gap probe in reader.html.
   _isLegacyWebView() {
     try { return document.documentElement.classList.contains('no-flexgap'); }
     catch { return false; }

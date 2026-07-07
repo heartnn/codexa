@@ -45,7 +45,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **CBZ & CBR comic books** — read comic archives directly; two-page spread on desktop; automatic CBR→CBZ conversion; ComicInfo.xml metadata
 - **Fixed-layout EPUB** — manga, children's books, and art books rendered at pixel-accurate dimensions via CSS transform scaling
 - **Exact position restore** — saves the page number per chapter; reopens on the precise page (not just approximate %)
-- **Peek mode** — open any book read-only without saving your position, including books not yet downloaded from a connected BookOrbit server
+- **Peek mode** — open any book read-only without saving your position, including books not yet downloaded from a connected BookOrbit server or OPDS catalogue
 - **Bookmarks** — add, label, and jump to bookmarks; badge shows bookmark count
 - **Highlights & annotations** — highlight in four colours (yellow, green, blue, pink) with optional notes; tap any highlight to edit or delete
 - **Search** — full-text search within a book with result navigation and back/accept buttons
@@ -82,7 +82,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 ### Library
 - **Multi-user** — JWT authentication, per-user library and settings
 - **Shelves** — organise books into named collections; bulk assign/remove
-- **OPDS browser** — browse and download from any OPDS catalogue (Calibre-Web, Komga, Kavita, …)
+- **OPDS browser** — browse any OPDS catalogue (Calibre-Web, Komga, Kavita, …) with a BookOrbit-style folder tree and card grid, grid density control, and per-server reachability status; download books or peek them read-only without downloading first
 - **OPDS shelf sync** — bulk-download an entire OPDS folder into a shelf; stale-book detection
 - **BookOrbit library browser** — native browsing of a self-hosted BookOrbit server's libraries, smart scopes, collections, series, and authors; add books to Codexa, peek them without downloading, edit collection membership, and view any book on BookOrbit directly
 - **BookOrbit collection/smart scope sync** — link a shelf to a BookOrbit collection or smart scope for one-click resync, same as OPDS shelf sync
@@ -186,8 +186,13 @@ Optionally, you can also connect to an external KOSync server in **Settings → 
 
 ## OPDS
 
-Navigate to **OPDS Browser** in the sidebar.  
+Navigate to **Online library** in the sidebar (it appears once at least one server is configured).
 Add any OPDS-compatible catalogue (Calibre-Web, Komga, Kavita, Ubooquity, Bookwyrm…) in **Settings → OPDS Servers**.
+
+Browse via a folder tree on the left and a card grid on the right. Every book card can be
+**downloaded** or **peeked** — Peek opens the book read-only without downloading it into your
+library at all; the file is fetched to a temporary location and cleaned up automatically as soon
+as you close the reader.
 
 ---
 

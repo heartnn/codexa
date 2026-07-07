@@ -315,6 +315,20 @@ function getServerById(servers, id) {
   return servers[idx];
 }
 
+// Annotate book entries with the local book id already tracked for them (if any), so the
+// client can show Read/Peek immediately instead of only discovering ownership reactively via
+// a 409 from the download route. Matches the same acq_href key used everywhere else in this
+// file (see book_opds_sources inserts/lookups below).
+function annotateLocalOwnership(entries, userId) {
+  const db   = getDb();
+  const rows = db.prepare('SELECT acq_href, book_id FROM book_opds_sources WHERE user_id = ?').all(userId);
+  const map  = new Map(rows.map(r => [r.acq_href, r.book_id]));
+  return entries.map(e => ({
+    ...e,
+    localBookId: (e.acqHref && map.get(e.acqHref)) || null,
+  }));
+}
+
 // ── OPDS 1.x XML parser config ────────────────────────────────────────────────
 const xmlParser = new XMLParser({
   ignoreAttributes:       false,
@@ -542,6 +556,26 @@ router.get('/servers', (req, res) => {
   })));
 });
 
+// ── GET /api/opds/health — reachability of every configured server ───────────
+// A lightweight parallel check (not a full feed fetch/parse) so the server list can be
+// color-coded immediately, not just for whichever server the user happens to click.
+router.get('/health', async (req, res) => {
+  const servers = getServers(req.user.id);
+  const checkedAt = Date.now();
+  const results = await Promise.all(servers.map(async (s, i) => {
+    try {
+      const r = await fetch(s.url, {
+        headers: buildAuthHeaders(s.username, s.password),
+        signal:  AbortSignal.timeout(5000),
+      });
+      return [i, { reachable: r.ok, checkedAt }];
+    } catch {
+      return [i, { reachable: false, checkedAt }];
+    }
+  }));
+  res.json(Object.fromEntries(results));
+});
+
 // ── POST /api/opds/servers ────────────────────────────────────────────────────
 router.post('/servers', (req, res) => {
   const { name, url, username, password } = req.body || {};
@@ -612,6 +646,7 @@ router.get('/browse/:id', async (req, res) => {
       acqHref: resolveUrl(e.acqHref, targetUrl),
       navHref: resolveUrl(e.navHref, targetUrl),
     }));
+    feed.entries = annotateLocalOwnership(feed.entries, req.user.id);
     feed.up = resolveUrl(feed.up, targetUrl);
     res.json(feed);
   } catch (err) {
@@ -687,6 +722,7 @@ router.get('/search/:id', async (req, res) => {
       acqHref: resolveUrl(e.acqHref, searchUrl),
       navHref: resolveUrl(e.navHref, searchUrl),
     }));
+    feed.entries = annotateLocalOwnership(feed.entries, req.user.id);
     res.json(feed);
   } catch (err) {
     console.warn('[opds] search error:', err.message);
@@ -900,6 +936,12 @@ router.post('/download/:id', async (req, res) => {
       const existing = db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(req.user.id, fileHash);
       if (existing) {
         fs.unlinkSync(tmpPath);
+        // Backfill the source link even here — the book may have reached the library through a
+        // route that never recorded one (manual upload, BookOrbit import, a different OPDS
+        // server mirroring the same file, ...). Without this, the *next* browse/search of this
+        // same acqHref would still show "Add" and hit this same 409 fallback again.
+        db.prepare('INSERT OR IGNORE INTO book_opds_sources (user_id, book_id, acq_href) VALUES (?, ?, ?)')
+          .run(req.user.id, existing.id, resolvedHref);
         return res.status(409).json({ error: 'error.book_already_in_library', id: existing.id });
       }
 
@@ -924,6 +966,14 @@ router.post('/download/:id', async (req, res) => {
              fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
              meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null, format);
 
+      // Without this, a book added via this single-book "Add"/Download button (as opposed to
+      // the bulk "Sync to shelf" flow, which already does this) never gets a book_opds_sources
+      // row — so annotateLocalOwnership() can never proactively detect it on a later browse/
+      // search, and the card would show "Add" again until the file_hash duplicate check below
+      // catches it reactively (409) on a second click.
+      db.prepare('INSERT OR IGNORE INTO book_opds_sources (user_id, book_id, acq_href) VALUES (?, ?, ?)')
+        .run(req.user.id, result.lastInsertRowid, resolvedHref);
+
       res.status(201).json({ id: result.lastInsertRowid, title: bookTitle, author: bookAuthor, file_hash: fileHash });
     } catch (err) {
       try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
@@ -931,6 +981,108 @@ router.post('/download/:id', async (req, res) => {
     }
   } catch (err) {
     console.error('[opds] download error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/opds/peek/:id — fetch a book for a read-only "peek" without downloading it ─────
+// Mirrors server/routes/bookorbit.js's createBookOrbitPeek: a normal `books` row flagged
+// ephemeral via `peek_expires_at` (see server/utils/peekCleanup.js — already generic, not
+// BookOrbit-specific), so the reader's existing GET /:id / :id/file routes and isPeekMode gating
+// work completely unchanged. Deliberately duplicates the download route's fetch/content-type/
+// CBR-conversion prologue rather than sharing it, to keep that well-tested real-download path
+// untouched. Unlike a real download, this never runs metadata extraction/cover generation — the
+// client already has title/author from the browse/search entry it rendered.
+async function createOpdsPeek(userId, server, { href, title, author }) {
+  const resolvedHref = resolveUrl(href, server.url);
+  const headers = buildAuthHeaders(server.username, server.password);
+  const r = await fetch(resolvedHref, { headers, signal: AbortSignal.timeout(60000) });
+  if (!r.ok) return { ok: false, status: 502, error: `HTTP ${r.status}` };
+
+  const ct = (r.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('epub') && !ct.includes('octet') &&
+      !ct.includes('zip')  && !ct.includes('rar')   &&
+      !ct.includes('cbr')  && !ct.includes('cbz')) {
+    return { ok: false, status: 502, error: 'error.unexpected_content_type' };
+  }
+
+  const fs   = require('fs');
+  const path = require('path');
+  const { DATA_DIR }                      = require('../db');
+  const { computeFileHash }               = require('../utils/epub');
+  const { isCbrBuffer, convertCbrToCbz }  = require('../utils/cbr');
+  const { peekFilePath, PEEK_TTL_SECONDS } = require('../utils/peekCleanup');
+  const db      = getDb();
+  const TMP_DIR = path.join(DATA_DIR, 'tmp');
+  fs.mkdirSync(TMP_DIR, { recursive: true });
+
+  let buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length < 100) return { ok: false, status: 502, error: 'error.file_empty' };
+
+  let format = 'epub';
+  if (isCbrBuffer(buf)) {
+    buf = await convertCbrToCbz(buf);
+    format = 'cbz';
+  } else if (ct.includes('cbz') || ct.includes('comicbook+zip')) {
+    format = 'cbz';
+  }
+
+  const stagingPath = path.join(TMP_DIR, `opds_peek_${Date.now()}_${userId}_${Math.random().toString(36).slice(2)}.tmp`);
+  fs.writeFileSync(stagingPath, buf);
+
+  try {
+    const fileHash = computeFileHash(stagingPath);
+
+    // Already really downloaded — return the real book instead of creating anything ephemeral,
+    // backfilling the source link if this acqHref specifically was never recorded (same fix as
+    // POST /download/:id above).
+    const existing = db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ? AND peek_expires_at IS NULL').get(userId, fileHash);
+    if (existing) {
+      fs.unlinkSync(stagingPath);
+      db.prepare('INSERT OR IGNORE INTO book_opds_sources (user_id, book_id, acq_href) VALUES (?, ?, ?)')
+        .run(userId, existing.id, resolvedHref);
+      return { ok: true, id: existing.id, ephemeral: false };
+    }
+
+    // Synthetic, structurally distinct from any real SHA-256 hex hash — can never collide with
+    // UNIQUE(user_id, file_hash) against a real book, even from a concurrent second peek of the
+    // same book (each gets its own timestamp+random suffix). Mirrors createBookOrbitPeek exactly.
+    const peekHash = `peek_opds_${Date.now()}_${userId}_${Math.random().toString(36).slice(2)}`;
+    const ext      = format === 'cbz' ? '.cbz' : '.epub';
+    const filename = `${peekHash}${ext}`;
+    const destPath = peekFilePath(userId, filename);
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    try { fs.renameSync(stagingPath, destPath); }
+    catch { fs.copyFileSync(stagingPath, destPath); fs.unlinkSync(stagingPath); }
+
+    const fileSize = fs.statSync(destPath).size;
+    const result = db.prepare(`
+      INSERT INTO books (user_id, title, author, file_hash, filename, cover_path, file_size, format, peek_expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(userId, title || 'Unknown', author || '', peekHash, filename, '', fileSize, format,
+           Math.floor(Date.now() / 1000) + PEEK_TTL_SECONDS);
+
+    return { ok: true, id: result.lastInsertRowid, ephemeral: true };
+  } catch (err) {
+    try { fs.unlinkSync(stagingPath); } catch { /* ignore */ }
+    return { ok: false, status: 500, error: err.message };
+  }
+}
+
+router.post('/peek/:id', async (req, res) => {
+  const servers = getServers(req.user.id);
+  const server  = getServerById(servers, req.params.id);
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
+
+  const { href, title, author } = req.body || {};
+  if (!href) return res.status(400).json({ error: 'error.href_required' });
+
+  try {
+    const result = await createOpdsPeek(req.user.id, server, { href, title, author });
+    if (!result.ok) return res.status(result.status || 500).json({ error: result.error });
+    res.status(201).json({ id: result.id, ephemeral: result.ephemeral });
+  } catch (err) {
+    console.error('[opds] peek error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

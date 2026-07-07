@@ -8,6 +8,24 @@ let _initialized    = false;
 let _cachedServers  = [];
 let _editingServerId = null;
 
+// ── Tabs ────────────────────────────────────────────────────────────────────────
+// Registered at module load, not inside initSettings(), because the tab buttons/panels are
+// static markup present from page load — showPanel() can dispatch 'panelchange' with a tab
+// hint (e.g. from OPDS's "Add server" shortcut) before initSettings() has ever run (a user's
+// first-ever visit to Settings), so this can't depend on that lazy init having fired yet.
+export function activateSettingsTab(name) {
+  document.querySelectorAll('.settings-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.settings-tab-panel').forEach(p => { p.hidden = p.dataset.tabPanel !== name; });
+}
+
+document.querySelectorAll('.settings-tab').forEach(tabBtn => {
+  tabBtn.addEventListener('click', () => activateSettingsTab(tabBtn.dataset.tab));
+});
+
+document.addEventListener('panelchange', e => {
+  if (e.detail.panel === 'settings' && e.detail.tab) activateSettingsTab(e.detail.tab);
+});
+
 export async function initSettings() {
   if (_initialized) return;
   _initialized = true;
@@ -770,22 +788,6 @@ btnAddOpds.addEventListener('click', async () => {
 });
 
 btnCancelEdit.addEventListener('click', exitEditMode);
-
-  // ── Tabs ──────────────────────────────────────────────────────────────────────
-  // One panel visible at a time instead of one long scrolling page. Always starts on
-  // "General" — the admin tab may still be .hidden at this point (loadAdminSection()
-  // reveals it async), so there's nothing to restore/race against.
-  function initSettingsTabs() {
-    const tabs   = document.querySelectorAll('.settings-tab');
-    const panels = document.querySelectorAll('.settings-tab-panel');
-    tabs.forEach(tabBtn => {
-      tabBtn.addEventListener('click', () => {
-        tabs.forEach(b => b.classList.toggle('active', b === tabBtn));
-        panels.forEach(p => { p.hidden = p.dataset.tabPanel !== tabBtn.dataset.tab; });
-      });
-    });
-  }
-  initSettingsTabs();
 
   // ── Init ──────────────────────────────────────────────────────────────────────
   loadSettings();

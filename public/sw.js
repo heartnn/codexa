@@ -1,13 +1,13 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260707013';
+const CACHE_VERSION = 'br-v20260707018';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/login.html',
-  '/readerv4.html',
+  '/reader.html',
   '/settings.html',
   '/opds.html',
   '/css/main.css',
@@ -237,7 +237,7 @@ self.addEventListener('fetch', (e) => {
   }
 
   // Cache-first for app shell assets.
-  // ignoreSearch: HTML pages are navigated to with ?id= query params (e.g. readerv4.html?id=234)
+  // ignoreSearch: HTML pages are navigated to with ?id= query params (e.g. reader.html?id=234)
   // but the APP_SHELL caches them without params. Without ignoreSearch the lookup misses,
   // the offline network fetch fails, .catch(() => cached) returns undefined, and respondWith
   // throws "Failed to convert value to 'Response'".

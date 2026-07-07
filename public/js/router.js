@@ -4,7 +4,7 @@ let _current  = null;
 
 export function getCurrentPanel() { return _current; }
 
-export async function showPanel(name, pushState = true) {
+export async function showPanel(name, pushState = true, opts = {}) {
   if (!PANELS.includes(name)) name = 'library';
 
   PANELS.forEach(p => {
@@ -20,12 +20,13 @@ export async function showPanel(name, pushState = true) {
 
   _current = name;
 
-  const url = name === 'library' ? '/' : `/?panel=${name}`;
+  let url = name === 'library' ? '/' : `/?panel=${name}`;
+  if (opts.tab) url += `${url.includes('?') ? '&' : '?'}tab=${opts.tab}`;
   if (pushState && (location.pathname + location.search !== url)) {
-    history.pushState({ panel: name }, '', url);
+    history.pushState({ panel: name, ...opts }, '', url);
   }
 
-  document.dispatchEvent(new CustomEvent('panelchange', { detail: { panel: name } }));
+  document.dispatchEvent(new CustomEvent('panelchange', { detail: { panel: name, ...opts } }));
 
   if (_inits[name]) {
     const fn = _inits[name];
@@ -40,11 +41,14 @@ export async function initRouter(initMap) {
   }
 
   window.addEventListener('popstate', e => {
-    const p = e.state?.panel || new URLSearchParams(location.search).get('panel') || 'library';
-    showPanel(p, false);
+    const params = new URLSearchParams(location.search);
+    const p   = e.state?.panel || params.get('panel') || 'library';
+    const tab = e.state?.tab   || params.get('tab')    || undefined;
+    showPanel(p, false, tab ? { tab } : {});
   });
 
   const params  = new URLSearchParams(location.search);
   const initial = params.get('panel') || 'library';
-  await showPanel(initial, false);
+  const tab     = params.get('tab') || undefined;
+  await showPanel(initial, false, tab ? { tab } : {});
 }

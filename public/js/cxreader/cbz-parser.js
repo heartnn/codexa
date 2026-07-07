@@ -1,6 +1,6 @@
 // CXReader — CBZ parser
 // Parses a CBZ (ZIP of images) into the same book-object shape as EpubParser.parse().
-// JSZip is used as a global (loaded via <script> in readerv4.html).
+// JSZip is used as a global (loaded via <script> in reader.html).
 
 const IMAGE_EXT = /\.(jpe?g|png|webp|gif|avif)$/i;
 
