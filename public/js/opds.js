@@ -39,6 +39,38 @@ function coverSrc(url, serverId) {
   return `/api/opds/cover?url=${encodeURIComponent(url)}&server=${serverId}&token=${encodeURIComponent(token)}`;
 }
 
+// ── Folder-path cache (root→folder breadcrumb/tree chains) ──────────────────
+// Persisted in localStorage, keyed by serverId+folder URL, so a repeat "Open in OPDS" (or
+// revisiting any folder you've browsed before) is instant instead of re-running the
+// resolveFolderPath breadth-first search every time. Populated two ways: automatically by every
+// successful browseUrl() (ordinary browsing organically fills this in for free), and explicitly
+// after resolveFolderPath() resolves a fresh deep link. Always paired with a real browseUrl()
+// call for the actual content, so a stale cached ancestor structure only affects the tree's
+// display of sibling folders — the books/subfolders you actually see are always fetched fresh.
+const FOLDER_PATH_CACHE_KEY = 'br_opds_folder_paths';
+const FOLDER_PATH_CACHE_MAX = 200; // oldest entries evicted first (FIFO via object key order)
+
+function loadFolderPathCache() {
+  try { return JSON.parse(localStorage.getItem(FOLDER_PATH_CACHE_KEY) || '{}'); } catch { return {}; }
+}
+
+function cacheFolderPath(serverId, targetUrl, chain) {
+  if (targetUrl == null) return; // the root itself needs no caching
+  try {
+    const cache = loadFolderPathCache();
+    cache[`${serverId}::${targetUrl}`] = chain.map(l => ({ title: l.title, url: l.url, children: l.children }));
+    const keys = Object.keys(cache);
+    if (keys.length > FOLDER_PATH_CACHE_MAX) {
+      for (const k of keys.slice(0, keys.length - FOLDER_PATH_CACHE_MAX)) delete cache[k];
+    }
+    localStorage.setItem(FOLDER_PATH_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* storage full/unavailable — non-critical, just means no speedup next time */ }
+}
+
+function getCachedFolderPath(serverId, targetUrl) {
+  return loadFolderPathCache()[`${serverId}::${targetUrl}`] || null;
+}
+
 // ── Mobile off-canvas drawer (mirrors bookorbit.js's openDrawer/closeDrawer) ──
 function openDrawer() {
   sidebarEl.classList.add('opds-drawer-open');
@@ -174,7 +206,12 @@ async function browseUrl(url) {
 
     if (navStack.length > 0) {
       const level = navStack[navStack.length - 1];
-      level.title    = feed.title || level.title;
+      // Prefer whatever title this level already has (set correctly from the parent's own entry
+      // list — see navigateToFolder/resolveFolderPath) over the folder's own self-reported feed
+      // title, which some OPDS servers report generically (e.g. the same name for every leaf
+      // feed) regardless of the folder's real name. Only fall back to feed.title when nothing
+      // better is known yet (e.g. the very first root browse).
+      level.title    = level.title || feed.title;
       level.upUrl    = feed.up || null;
       level.children = feed.entries.filter(e => e.isNav);
     }
@@ -183,6 +220,7 @@ async function browseUrl(url) {
     renderFeed(feed);
     renderPagination();
     btnUp.disabled = !feed.up && navStack.length <= 1;
+    cacheFolderPath(currentServer.id, url, navStack); // organically speeds up future deep links
     return true;
   } catch (err) {
     toast.error(t('opds.err_browse', { msg: err.message }));
@@ -926,16 +964,86 @@ document.addEventListener('opdsserverschanged', async () => {
   } catch { /* ignore */ }
 });
 
+// Reconstructs the full root→target breadcrumb/tree path for a deep link that only knows the
+// target folder's own URL (e.g. a linked shelf's stored opds_folder_url) — used by
+// openOpdsBrowserAtFolder below. Deliberately does NOT use the OPDS `up` link to walk backward —
+// `up` is optional per spec and plenty of servers omit it below the top level, which silently
+// collapses the walk to just one hop (reproducing the original 2-level bug). Instead this
+// breadth-first searches *forward* from the root using navHref links only, since every folder is
+// guaranteed reachable that way — it's how normal browsing already works. Bounded to MAX_DEPTH
+// levels and de-duplicates visited URLs as a cycle guard.
+async function resolveFolderPath(server, targetUrl) {
+  const MAX_DEPTH = 5;
+  const rootFeed = await apiFetch(`/opds/browse/${server.id}`);
+  const rootChildren = rootFeed.entries.filter(e => e.isNav);
+  const rootLevel = { title: server.name, url: null, upUrl: null, children: rootChildren };
+
+  let frontier = [{ path: [rootLevel], children: rootChildren }];
+  const visited = new Set();
+
+  for (let depth = 0; depth < MAX_DEPTH && frontier.length; depth++) {
+    // Check this depth's already-fetched children for the target before fetching anything new.
+    for (const { path, children } of frontier) {
+      const match = children.find(e => e.navHref === targetUrl);
+      if (match) {
+        const feed = await apiFetch(`/opds/browse/${server.id}?url=${encodeURIComponent(targetUrl)}`);
+        return [...path, { title: match.title, url: targetUrl, upUrl: null, children: feed.entries.filter(e => e.isNav) }];
+      }
+    }
+
+    const candidates = [];
+    for (const { path, children } of frontier) {
+      for (const entry of children) {
+        if (visited.has(entry.navHref)) continue;
+        visited.add(entry.navHref);
+        candidates.push({ entry, path });
+      }
+    }
+    if (!candidates.length) break;
+
+    const fetched = await Promise.all(candidates.map(async ({ entry, path }) => {
+      try {
+        const feed = await apiFetch(`/opds/browse/${server.id}?url=${encodeURIComponent(entry.navHref)}`);
+        return { entry, path, children: feed.entries.filter(e => e.isNav) };
+      } catch {
+        return { entry, path, children: [] };
+      }
+    }));
+
+    frontier = fetched.map(({ path, entry, children }) => ({
+      path: [...path, { title: entry.title, url: entry.navHref, upUrl: null, children }],
+      children,
+    }));
+  }
+
+  throw new Error(`folder not found within ${MAX_DEPTH} levels`);
+}
+
 // ── Deep-link into OPDS browser at a specific server + folder URL ────────────
 export async function openOpdsBrowserAtFolder(serverId, folderUrl) {
   await showPanel('opds'); // ensures initOpds/loadServers completes first
   const server = servers.find(s => s.id === parseInt(serverId, 10));
   if (!server) return;
   currentServer = server;
-  navStack = [
-    { title: server.name, url: null, upUrl: null, children: null },
-    { title: '', url: folderUrl, upUrl: null, children: null },
-  ];
+
+  const cached = getCachedFolderPath(server.id, folderUrl);
+  if (cached) {
+    // Instant — skip the breadth-first search entirely. browseUrl() below still fetches the
+    // target folder's own content fresh either way, and re-writes this same cache entry, so a
+    // stale cached ancestor structure (if the catalog was reorganized) self-heals on next visit.
+    navStack = cached.map(l => ({ title: l.title, url: l.url, upUrl: null, children: l.children }));
+  } else {
+    try {
+      navStack = await resolveFolderPath(server, folderUrl);
+    } catch {
+      // Fall back to the old flat guess (still gets you to the right content, just without a
+      // full breadcrumb/tree — better than failing the whole deep link over a transient error).
+      navStack = [
+        { title: server.name, url: null, upUrl: null, children: null },
+        { title: '', url: folderUrl, upUrl: null, children: null },
+      ];
+    }
+  }
   renderServerList();
   browseUrl(folderUrl);
 }

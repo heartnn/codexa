@@ -44,16 +44,16 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
   initDisplaySizeControls(sidebar);
   initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
 
-  // BookOrbit nav item visibility — fetched here (not left to library.js's own /settings
-  // fetch) so it's correct even when the app opens directly into a non-library panel.
+  // BookOrbit + Online library nav item visibility — fetched here (not left to library.js's own
+  // /settings fetch) so both are correct even when the app opens directly into a non-library
+  // panel. One request for both: GET /settings already returns opds_servers in full (it's the
+  // same data GET /opds/servers exposes, just not password-stripped — fine here since it's never
+  // rendered, only counted), so there's no need for a second round trip on every page load just
+  // to check whether any OPDS server is configured.
   apiFetch('/settings').then(s => {
     setBookorbitNavVisible(!!s.bookorbit_sync_enabled);
     if (s.bookorbit_sync_enabled) checkBookorbitHealth();
-  }).catch(() => {});
-
-  // Online library nav item — only worth showing once at least one OPDS server exists.
-  apiFetch('/opds/servers').then(servers => {
-    setOpdsNavVisible(servers.length > 0);
+    setOpdsNavVisible((s.opds_servers || []).length > 0);
   }).catch(() => {});
 
   // Username

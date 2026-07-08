@@ -125,9 +125,121 @@ async function loadSublist(section, q, page) {
     sublistTotal = Array.isArray(data) ? items.length : (data.total ?? items.length);
     sublistCache[section] = items;
     renderSublist(items);
+    // Tiles only show *before* an item is picked — mirrors OPDS's folder tiles. Re-filtering
+    // Series/Authors (doSearchOrFilter) also calls loadSublist while a specific series/author's
+    // books are already on screen; skipping this when currentItem is set keeps that book grid in
+    // place instead of clobbering it with a fresh tile list.
+    if (!currentItem) renderSectionTiles(items);
   } catch (err) {
     sublistEl.innerHTML = `<div class="imt-empty" style="padding:.5rem">${escHtml(t('common.err_prefix') + err.message)}</div>`;
   }
+}
+
+// Picking an item — from either the left sublist row or a right-pane tile (see
+// renderSectionTiles) — always does exactly this: select it, reflect that in the left list
+// (tiles vanish the instant an item is picked, replaced by its books, so they need no active
+// state of their own), load its books, and close the mobile drawer.
+function selectItem(item) {
+  currentItem = { id: item.id, name: item.name };
+  sublistEl.querySelectorAll('.bookorbit-sublist-item').forEach(b =>
+    b.classList.toggle('active', Number(b.dataset.id) === item.id));
+  titleEl.textContent = item.name;
+  loadBooks(0);
+  closeDrawer();
+}
+
+// Right-pane folder tiles for a section's items — mirrors public/js/opds.js's folder tiles
+// exactly (same .nav-tile/.nav-tile-grid/.nav-tile-sync-btn classes), shown before a specific
+// item is picked. #bookorbit-grid needs no structural change for this: unlike OPDS, a
+// BookOrbit section's tiles and its books are never shown at once, so this is a plain innerHTML
+// swap — the same one that already happens between the "pick an item" placeholder and book
+// cards. The wrapper needs grid-column:1/-1 so it spans the outer grid's full width instead of
+// being sized like a single book card (#bookorbit-grid is display:grid via the shared
+// .book-grid/.density-* classes); the tiles' own sizing then comes entirely from
+// .nav-tile-grid's grid-template-columns, independent of the outer density setting.
+// Shared pager for the paginated sublist sections (Series/Authors) — same sublistPage/
+// sublistTotal state and loadSublist() calls regardless of which container it's built into.
+// Used both in the left sublist (renderSublist) and, for mobile — where the left menu is hidden
+// behind the hamburger drawer — under the folder tiles on the right (renderSectionTiles) too.
+function buildSublistPager() {
+  const paged = currentSection === 'series' || currentSection === 'authors';
+  const totalPages = Math.max(1, Math.ceil(sublistTotal / SUBLIST_PAGE_SIZE));
+  if (!paged || totalPages <= 1) return null;
+
+  const pager = document.createElement('div');
+  pager.className = 'bookorbit-sublist-pager';
+
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'opds-page-btn';
+  prevBtn.textContent = '‹';
+  prevBtn.disabled = sublistPage <= 0;
+  prevBtn.addEventListener('click', () => loadSublist(currentSection, sublistQuery, sublistPage - 1));
+
+  const info = document.createElement('span');
+  info.className = 'opds-page-info';
+  info.textContent = `${sublistPage + 1} / ${totalPages}`;
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'opds-page-btn';
+  nextBtn.textContent = '›';
+  nextBtn.disabled = sublistPage >= totalPages - 1;
+  nextBtn.addEventListener('click', () => loadSublist(currentSection, sublistQuery, sublistPage + 1));
+
+  pager.appendChild(prevBtn);
+  pager.appendChild(info);
+  pager.appendChild(nextBtn);
+  return pager;
+}
+
+function renderSectionTiles(items) {
+  if (!items.length) {
+    emptyEl.hidden = false;
+    paginationEl.hidden = true;
+    return;
+  }
+  emptyEl.hidden = true;
+
+  const syncable = currentSection === 'collections' || currentSection === 'smartScopes';
+  const wrap = document.createElement('div');
+  wrap.className = 'nav-tile-grid';
+  wrap.style.gridColumn = '1 / -1';
+
+  items.forEach(item => {
+    const tile = document.createElement('button');
+    tile.className = 'nav-tile';
+    tile.innerHTML = `
+      <span class="nav-tile-icon-wrap">
+        <img src="/images/folder.svg" class="nav-icon nav-icon-folder" alt="">
+        ${item.bookCount != null ? `<span class="nav-tile-count">${item.bookCount}</span>` : ''}
+      </span>
+      <span class="nav-tile-label">${escHtml(item.name)}</span>
+      ${syncable ? `<button class="nav-tile-sync-btn" title="${t('bookorbit.sync_title')}">⇅</button>` : ''}
+    `;
+    tile.addEventListener('click', e => {
+      if (e.target.closest('.nav-tile-sync-btn')) return;
+      selectItem(item);
+    });
+    if (syncable) {
+      tile.querySelector('.nav-tile-sync-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        openBookorbitSyncModal(SECTION_SOURCE[currentSection], item.id, item.name);
+      });
+    }
+    wrap.appendChild(tile);
+  });
+
+  gridEl.innerHTML = '';
+  gridEl.appendChild(wrap);
+
+  // Mirrors the left sublist's own pager (see buildSublistPager) so Series/Authors can still be
+  // paged on mobile without opening the drawer. #bookorbit-pagination is otherwise only used by
+  // renderPagination() for book results, which never runs at the same time as this (tiles only
+  // show before a specific item is picked; book results only show once one is, or while
+  // searching) — safe to repurpose the same element for either.
+  const pager = buildSublistPager();
+  paginationEl.innerHTML = '';
+  if (pager) paginationEl.appendChild(pager);
+  paginationEl.hidden = !pager;
 }
 
 function renderSublist(items) {
@@ -156,14 +268,7 @@ function renderSublist(items) {
       countSpan.textContent = item.bookCount;
       btn.appendChild(countSpan);
     }
-    btn.addEventListener('click', () => {
-      currentItem = { id: item.id, name: item.name };
-      sublistEl.querySelectorAll('.bookorbit-sublist-item').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      titleEl.textContent = item.name;
-      loadBooks(0);
-      closeDrawer(); // a specific library/collection/series/author was picked — show its books now
-    });
+    btn.addEventListener('click', () => selectItem(item));
     row.appendChild(btn);
 
     if (syncable) {
@@ -181,33 +286,8 @@ function renderSublist(items) {
     sublistEl.appendChild(row);
   });
 
-  const paged = currentSection === 'series' || currentSection === 'authors';
-  const totalPages = Math.max(1, Math.ceil(sublistTotal / SUBLIST_PAGE_SIZE));
-  if (paged && totalPages > 1) {
-    const pager = document.createElement('div');
-    pager.className = 'bookorbit-sublist-pager';
-
-    const prevBtn = document.createElement('button');
-    prevBtn.className = 'opds-page-btn';
-    prevBtn.textContent = '‹';
-    prevBtn.disabled = sublistPage <= 0;
-    prevBtn.addEventListener('click', () => loadSublist(currentSection, sublistQuery, sublistPage - 1));
-
-    const info = document.createElement('span');
-    info.className = 'opds-page-info';
-    info.textContent = `${sublistPage + 1} / ${totalPages}`;
-
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'opds-page-btn';
-    nextBtn.textContent = '›';
-    nextBtn.disabled = sublistPage >= totalPages - 1;
-    nextBtn.addEventListener('click', () => loadSublist(currentSection, sublistQuery, sublistPage + 1));
-
-    pager.appendChild(prevBtn);
-    pager.appendChild(info);
-    pager.appendChild(nextBtn);
-    sublistEl.appendChild(pager);
-  }
+  const pager = buildSublistPager();
+  if (pager) sublistEl.appendChild(pager);
 }
 
 // ── Books (right pane) ────────────────────────────────────────────────────────
@@ -710,8 +790,14 @@ export function openBookorbitSyncModal(source, id, name, existingShelfId = null)
         const summary = msg.errors
           ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
           : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
-        toast.success(summary);
-        close();
+        if (msg.staleBooks && msg.staleBooks.length > 0) {
+          const stale = msg.staleBooks;
+          close();
+          openBookorbitStaleDialog(stale, msg.shelfId, summary);
+        } else {
+          toast.success(summary);
+          close();
+        }
       } else if (msg.type === 'error') {
         es.close();
         toast.error(t('common.error_msg', { msg: msg.message }));
@@ -725,6 +811,78 @@ export function openBookorbitSyncModal(source, id, name, existingShelfId = null)
       toast.error(t('opds.err_sse_disconnected'));
       close();
     };
+  });
+}
+
+// ── Stale books dialog ────────────────────────────────────────────────────────
+// Mirrors opds.js's openStaleDialog — books that were on the synced shelf before this sync but
+// are no longer in the linked BookOrbit collection/smart scope/library. Reuses the generic
+// opds.stale_* strings (title/keep/delete/also_in_shelves/deleted aren't source-specific) except
+// for the hint text, which has its own bookorbit.stale_hint wording.
+function openBookorbitStaleDialog(staleBooks, shelfId, syncSummary) {
+  document.getElementById('bookorbit-stale-modal')?.remove();
+  const otherCounts = new Map(staleBooks.map(b => [b.id, b.otherShelfCount || 0]));
+
+  const backdrop = document.createElement('div');
+  backdrop.id        = 'bookorbit-stale-modal';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:480px">
+      <button class="modal-close" id="bo-stale-close">&times;</button>
+      <h2>${t('opds.stale_title')}</h2>
+      <p style="font-size:.85rem;color:var(--color-text-muted);margin-bottom:1rem;line-height:1.5">
+        ${t('bookorbit.stale_hint')}
+      </p>
+      <div class="info-modal-shelves" style="max-height:220px;overflow-y:auto;margin-bottom:1rem">
+        ${staleBooks.map(b => `
+          <label class="info-modal-shelf-row">
+            <input type="checkbox" class="bo-stale-chk" value="${b.id}" checked />
+            <span>${escHtml(b.title)}</span>
+            ${b.author ? `<span style="font-size:.78rem;color:var(--color-text-muted)">${escHtml(b.author)}</span>` : ''}
+            ${(b.otherShelfCount || 0) > 0 ? `<span style="font-size:.72rem;color:var(--color-accent);margin-left:auto">${t('opds.stale_also_in_shelves')}</span>` : ''}
+          </label>`).join('')}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="bo-stale-skip">${t('opds.stale_keep')}</button>
+        <button class="btn btn-danger"    id="bo-stale-delete">${t('opds.stale_delete')}</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  const close = () => { backdrop.remove(); toast.success(syncSummary); };
+
+  backdrop.querySelector('#bo-stale-close').addEventListener('click', close);
+  backdrop.querySelector('#bo-stale-skip').addEventListener('click', async () => {
+    for (const bookId of otherCounts.keys()) {
+      try {
+        await apiFetch(`/shelves/${shelfId}/books/${bookId}`, { method: 'DELETE' });
+      } catch { /* ignore */ }
+    }
+    backdrop.remove();
+    reloadShelves();
+    reloadLibrary();
+    toast.success(syncSummary);
+  });
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+
+  backdrop.querySelector('#bo-stale-delete').addEventListener('click', async () => {
+    const checked = [...backdrop.querySelectorAll('.bo-stale-chk:checked')].map(el => Number(el.value));
+    if (!checked.length) { close(); return; }
+    let handled = 0;
+    for (const bookId of checked) {
+      try {
+        if (otherCounts.get(bookId) > 0) {
+          await apiFetch(`/shelves/${shelfId}/books/${bookId}`, { method: 'DELETE' });
+        } else {
+          await apiFetch(`/books/${bookId}`, { method: 'DELETE' });
+        }
+        handled++;
+      } catch { /* ignore */ }
+    }
+    backdrop.remove();
+    reloadShelves();
+    reloadLibrary();
+    toast.success(t('opds.stale_deleted', { summary: syncSummary, n: handled }));
   });
 }
 

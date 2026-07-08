@@ -1263,8 +1263,19 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     acquireWakeLock();
     scheduleWakeSync();
+    // Rotation on hide (below) always tries to start a fresh session right away, but that start
+    // call isn't guaranteed to finish if the page was actually closing rather than just
+    // backgrounding — re-establish one here if it didn't, so reading after a wake isn't silently
+    // untracked until the next checkpoint.
+    if (currentBook && isReady && !statsSessionId) startStatsSession(currentBook.id);
   }
-  if (document.visibilityState === 'hidden') writeInterruptedSession();
+  if (document.visibilityState === 'hidden') {
+    writeInterruptedSession();
+    // Same rationale as the manual sync actions (see #kosync-zone-br/#btn-sync): checkpoint the
+    // current reading session now, since 'hidden' is the one reliable signal that fires right
+    // when an e-reader cover closes or a tab is killed — before the connection actually drops.
+    rotateStatsSession({ background: true });
+  }
 });
 
 // ── Host page background ──────────────────────────────────────────────────────
@@ -2202,23 +2213,39 @@ function formatEta(pages) {
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
 
-// Average chapter length in pages (from cache)
-function averageChapPages() {
-  const vals = Object.values(chapPageCache);
-  return vals.length ? Math.max(1, Math.round(vals.reduce((s, v) => s + v, 0) / vals.length)) : 20;
+// Estimated page count for a chapter not yet paginated, proportional to its own content weight
+// (spineWeights — uncompressed file size as a text-length proxy, already computed by CXReader
+// for the content-proportional percentage calc) calibrated against chapters actually paginated
+// so far: pagesPerWeightUnit = (real pages of visited chapters) / (their combined weight),
+// applied to this chapter's own weight. A chapter twice as long by file size is estimated at
+// roughly twice the pages, instead of just "the average of whatever's been visited" — which
+// drifted as the average itself shifted with every newly-visited chapter, causing "pages left"
+// to sometimes barely move (or even tick up) right when crossing a chapter boundary. Falls back
+// to a flat default only when nothing has been visited yet (no ratio to calibrate against).
+function estimateChapPages(spineIndex) {
+  if (chapPageCache[spineIndex] != null) return chapPageCache[spineIndex];
+  const weights = _cxReader?.spineWeights || [];
+  const w = weights[spineIndex] || 1;
+  let visitedPages = 0, visitedWeight = 0;
+  for (const idxStr of Object.keys(chapPageCache)) {
+    const idx = Number(idxStr);
+    visitedPages  += chapPageCache[idx];
+    visitedWeight += weights[idx] || 1;
+  }
+  return visitedWeight > 0 ? Math.max(1, Math.round((visitedPages / visitedWeight) * w)) : 20;
 }
 
 // Estimated book pages
 function estimateBookTotal() {
   const len = _cxReader?.spine?.length || 1;
   let total = 0;
-  for (let i = 0; i < len; i++) total += chapPageCache[i] || averageChapPages();
+  for (let i = 0; i < len; i++) total += estimateChapPages(i);
   return Math.max(1, total);
 }
 
 function estimateBookPage() {
   let pages = 0;
-  for (let i = 0; i < currentSpineIndex; i++) pages += chapPageCache[i] || averageChapPages();
+  for (let i = 0; i < currentSpineIndex; i++) pages += estimateChapPages(i);
   return pages + currentChapPage;
 }
 
@@ -5915,6 +5942,25 @@ async function endStatsSession() {
   }
 }
 
+// Finalizes the current reading_sessions row and immediately opens a new one — a "checkpoint" so
+// a long session isn't entirely lost (for both Codexa's own stats and BookOrbit's reading log,
+// which only ever sees a session once it has an end_ts — see uploadSessions() in
+// bookorbitSync.js) if the app never gets a chance to close cleanly afterward: a killed tab, an
+// e-reader cover closing and cutting wifi, or a crash. Called both automatically (page hidden)
+// and from the manual KOSync push actions.
+// `background`: use the keepalive-fetch finalize (endStatsSessionBackground) instead of the
+// normal awaited PATCH — for the visibilitychange→hidden case, where the page may vanish before
+// a regular fetch completes. Starting the new session is always a best-effort, non-keepalive
+// call either way: if the page really is closing, it simply won't finish, which just means
+// tracking resumes at the next successful checkpoint (or the visibilitychange→visible handler
+// below) instead of right now — same failure mode as not rotating at all, no worse.
+function rotateStatsSession({ background = false } = {}) {
+  if (!currentBook || !statsSessionId) return;
+  if (background) endStatsSessionBackground();
+  else endStatsSession().catch(() => {});
+  startStatsSession(currentBook.id);
+}
+
 function logChapterVisit(bookId, href, title) {
   if (!bookId || !href) return;
   apiFetch('/stats/chapter', {
@@ -6368,6 +6414,9 @@ document.getElementById('kosync-zone-br')?.addEventListener('click', async () =>
   } else {
     toast.success(t('reader.kosync_push_done', { pct: Math.round(currentPct * 100) }));
     checkBookorbitStatus({ always: true });
+    // Checkpoint the reading session here too — a manual push is a natural "I'm about to put
+    // this down" moment, same rationale as the automatic rotation on visibilitychange→hidden.
+    rotateStatsSession();
   }
 });
 document.getElementById('btn-toc').addEventListener('click', () =>
@@ -6469,6 +6518,9 @@ document.getElementById('btn-sync')?.addEventListener('click', async () => {
   try {
     await saveProgress({ forceRemote: true, inSession: true, forced: true });
     cancelDebouncedSync();
+    // Checkpoint the reading session here too — same rationale as the corner-tap push and the
+    // automatic rotation on visibilitychange→hidden (see rotateStatsSession).
+    rotateStatsSession();
   } finally {
     btn.disabled = false;
     btn.classList.remove('btn-sync-busy');

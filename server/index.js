@@ -3,6 +3,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const compression = require('compression');
 const { initDb, DATA_DIR } = require('./db');
 
 const authRoutes     = require('./routes/auth');
@@ -44,6 +45,13 @@ initDb();
 // Trust the first proxy hop (nginx/traefik/etc.) so express-rate-limit can
 // read the real client IP from X-Forwarded-For correctly.
 app.set('trust proxy', 1);
+
+// Gzip every response (JS/CSS/HTML/JSON) — nothing was compressing these before, so every asset
+// (main.css, reader_v4.js, etc.) was going out over the wire at full size on every request.
+// Placed before static/route handlers so it wraps all of them; a reverse proxy in front (see
+// README's "Self-Hosting Behind a Reverse Proxy") may also compress, which is harmless — this
+// just guarantees it happens even for users running Codexa directly with no proxy at all.
+app.use(compression());
 
 if (process.env.CORS_ORIGIN) {
   app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));

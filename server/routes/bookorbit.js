@@ -617,7 +617,16 @@ router.get('/sync-sse', async (req, res) => {
       shelf.id,
     );
 
+    // Collect pre-existing book IDs in the shelf (to detect stale books after sync — same
+    // approach as opds.js's sync-sse: anything that was on the shelf before but isn't touched
+    // by this sync is a candidate for "no longer in the source").
+    const preExistingBookIds = new Set();
+    db.prepare('SELECT book_id FROM book_shelves WHERE shelf_id = ?')
+      .all(shelf.id)
+      .forEach(row => preExistingBookIds.add(row.book_id));
+
     let added = 0, skipped = 0, errors = 0;
+    const syncedBookIds = new Set(); // track all book IDs touched by this sync
     const localByBoId = new Map();
     const boIds = books.map(b => b.id).filter(Boolean);
     if (boIds.length) {
@@ -637,6 +646,7 @@ router.get('/sync-sse', async (req, res) => {
       const existingLocalId = localByBoId.get(b.id);
       if (existingLocalId) {
         addToShelf.run(shelf.id, existingLocalId);
+        syncedBookIds.add(existingLocalId);
         skipped++;
         continue;
       }
@@ -651,9 +661,11 @@ router.get('/sync-sse', async (req, res) => {
         });
         if (result.ok) {
           addToShelf.run(shelf.id, result.id);
+          syncedBookIds.add(result.id);
           added++;
         } else if (result.alreadyOwned && result.id) {
           addToShelf.run(shelf.id, result.id);
+          syncedBookIds.add(result.id);
           skipped++;
         } else {
           errors++;
@@ -664,7 +676,28 @@ router.get('/sync-sse', async (req, res) => {
       }
     }
 
-    done({ type: 'done', added, skipped, errors, shelfId: shelf.id });
+    // Detect stale books: in shelf before sync but NOT touched by this sync (i.e. no longer in
+    // the BookOrbit collection/smart scope/library). Fallback: if a limit truncated this sync run,
+    // a book might still genuinely be in the source but beyond the limited slice — check its
+    // bo_book_id against the FULL unlimited listing (allBooks) before calling it stale.
+    const staleBooks = [];
+    if (preExistingBookIds.size > 0) {
+      const allBoIds = new Set(allBooks.map(b => b.id));
+      for (const bookId of preExistingBookIds) {
+        if (syncedBookIds.has(bookId)) continue;
+        const state = db.prepare('SELECT bo_book_id FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(req.user.id, bookId);
+        if (state?.bo_book_id != null && allBoIds.has(state.bo_book_id)) continue;
+        const bk = db.prepare('SELECT id, title, author FROM books WHERE id = ?').get(bookId);
+        if (bk) {
+          const { cnt: otherShelfCount } = db.prepare(
+            'SELECT COUNT(*) AS cnt FROM book_shelves WHERE book_id = ? AND shelf_id != ?'
+          ).get(bookId, shelf.id) || { cnt: 0 };
+          staleBooks.push({ ...bk, otherShelfCount });
+        }
+      }
+    }
+
+    done({ type: 'done', added, skipped, errors, shelfId: shelf.id, staleBooks });
   } catch (err) {
     console.error('[bookorbit] sync-sse error:', err.message);
     done({ type: 'error', message: err.message });

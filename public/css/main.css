@@ -1998,7 +1998,7 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
   z-index: 2;
   text-decoration: none;
 }
-.book-card-peek-btn .nav-icon { filter: brightness(0) invert(1); width: 14px; height: 14px; }
+.book-card-peek-btn .nav-icon { width: 14px; height: 14px; }
 .book-card:hover .book-card-peek-btn,
 .book-card.tapped .book-card-peek-btn { opacity: 1; }
 html[data-lib-theme="eink"] .book-card-peek-btn,
@@ -2006,8 +2006,6 @@ html[data-lib-theme="eink"] .book-card-peek-btn,
   background: rgba(255, 255, 255, 0.90);
   border-color: rgba(0, 0, 0, 0.55);
 }
-html[data-lib-theme="eink"] .book-card-peek-btn .nav-icon,
-.sidebar-layout[data-lib-theme="eink"] .book-card-peek-btn .nav-icon { filter: none; }
 
 /* Three-dots context-menu trigger on book card */
 .book-card-menu-btn {
@@ -2535,6 +2533,10 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
   display: flex; gap: .4rem; padding: .5rem 1rem;
   border-bottom: 1px solid var(--color-border); background: var(--color-surface); flex-shrink: 0;
 }
+/* #bookorbit-search-row (this class's other user) toggles its own hidden attribute per section
+   (selectSection); OPDS's own search row never does, so this only ever mattered for BookOrbit —
+   same [hidden]-vs-own-display gotcha as the pagination/grid fixes above. */
+#bookorbit-search-row[hidden] { display: none; }
 #catalog-search { flex: 1; }
 #catalog-grid {
   flex: 1; overflow-y: auto; padding: .75rem 1rem;
@@ -2552,6 +2554,20 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 .nav-tile:hover { border-color: var(--color-accent); background: var(--color-surface2); }
 .nav-tile-icon, .nav-tile > .nav-icon { font-size: 1.8rem; line-height: 1; }
 .nav-tile-label { font-size: .78rem; font-weight: 600; text-align: center; line-height: 1.3; }
+/* Book-count badge overlaid on a tile's folder icon (BookOrbit's Libraries/Smart Scopes/
+   Collections/Series/Authors tiles — OPDS folders don't carry a count, so this simply never
+   renders there). Same small-corner-badge idiom as .book-offline-badge. */
+.nav-tile-icon-wrap { position: relative; display: inline-flex; }
+.nav-tile-count {
+  position: absolute; top: -6px; right: -8px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: var(--color-accent); color: #fff;
+  font-size: .65rem; font-weight: 700; line-height: 1;
+  border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+}
+html[data-lib-theme="eink"] .nav-tile-count,
+.sidebar-layout[data-lib-theme="eink"] .nav-tile-count { background: #111; }
 #catalog-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--color-text-muted); }
 #catalog-empty { padding: 2rem; color: var(--color-text-muted); text-align: center; }
 #opds-pagination {
@@ -2563,6 +2579,10 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
 }
+/* Same [hidden]-vs-own-display-rule gotcha as .opds-welcome above — an ID rule's own `display`
+   outranks the UA stylesheet's default `[hidden]{display:none}`, so toggling .hidden alone did
+   nothing: the pagination bar (and its now-stale prev/next buttons) stayed visible. */
+#opds-pagination[hidden] { display: none; }
 .opds-page-btn {
   padding: .3rem .8rem;
   border: 1px solid var(--color-border);
@@ -2658,7 +2678,7 @@ html[data-lib-theme="eink"] .opds-card-actions .btn-icon .nav-icon,
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity .15s; z-index: 2; text-decoration: none;
 }
-.opds-card-peek-btn .nav-icon { filter: brightness(0) invert(1); width: 14px; height: 14px; }
+.opds-card-peek-btn .nav-icon { width: 14px; height: 14px; }
 .opds-card-cover-wrap:hover .opds-card-peek-btn,
 .opds-card.tapped .opds-card-peek-btn { opacity: 1; }
 .opds-card-cover-wrap:hover .opds-card-peek-btn.opds-btn-busy,
@@ -2668,8 +2688,6 @@ html[data-lib-theme="eink"] .opds-card-peek-btn,
 .sidebar-layout[data-lib-theme="eink"] .opds-card-peek-btn {
   background: rgba(255, 255, 255, 0.90); border-color: rgba(0, 0, 0, 0.55);
 }
-html[data-lib-theme="eink"] .opds-card-peek-btn .nav-icon,
-.sidebar-layout[data-lib-theme="eink"] .opds-card-peek-btn .nav-icon { filter: none; }
 
 /* Drawer toggle/close controls only exist for the off-canvas mobile layout — inert on desktop,
    where .opds-sidebar is always visible inline (see the @media block below). Mirrors BookOrbit's
@@ -2773,6 +2791,11 @@ html[data-lib-theme="eink"] .opds-card-peek-btn .nav-icon,
   flex: 1; overflow-y: auto; padding: .75rem 1rem;
   align-content: start;
 }
+/* setLoading() toggles gridEl.hidden — without this, the shared .book-grid class's own
+   display:grid (higher specificity than the UA stylesheet's default [hidden]{display:none})
+   would keep it visible regardless. Harmless in practice today (loadBooks immediately clears
+   .innerHTML right after), but a real footgun for any future code path that relies on this. */
+#bookorbit-grid[hidden] { display: none; }
 /* NOT overflow:hidden here — BookOrbit's panel is a bounded, internally-scrolling layout
    (unlike the main library grid, which lives in an unbounded page-scroll context where
    .book-card can safely use overflow:hidden). overflow:hidden zeroes a box's "automatic
@@ -2853,7 +2876,7 @@ html[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon .nav-icon,
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity .15s; z-index: 2; text-decoration: none;
 }
-.bookorbit-card-peek-btn .nav-icon { filter: brightness(0) invert(1); width: 14px; height: 14px; }
+.bookorbit-card-peek-btn .nav-icon { width: 14px; height: 14px; }
 .bookorbit-card-peek-btn:disabled { cursor: default; }
 .bookorbit-card-cover-wrap:hover .bookorbit-card-peek-btn,
 .bookorbit-card.tapped .bookorbit-card-peek-btn { opacity: 1; }
@@ -2863,8 +2886,6 @@ html[data-lib-theme="eink"] .bookorbit-card-peek-btn,
 .sidebar-layout[data-lib-theme="eink"] .bookorbit-card-peek-btn {
   background: rgba(255, 255, 255, 0.90); border-color: rgba(0, 0, 0, 0.55);
 }
-html[data-lib-theme="eink"] .bookorbit-card-peek-btn .nav-icon,
-.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-peek-btn .nav-icon { filter: none; }
 
 #bookorbit-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--color-text-muted); }
 #bookorbit-empty { padding: 2rem; color: var(--color-text-muted); text-align: center; }
@@ -2872,6 +2893,11 @@ html[data-lib-theme="eink"] .bookorbit-card-peek-btn .nav-icon,
   display: flex; align-items: center; justify-content: center; gap: .75rem;
   padding: .5rem 1rem; border-top: 1px solid var(--color-border); flex-shrink: 0;
 }
+/* This is the actual bug: selectSection() sets paginationEl.hidden = true when switching
+   sections, but this rule's own `display` (higher-specificity author rule) overrode the UA
+   stylesheet's default [hidden]{display:none}, so the bar — and its now-stale prev/next buttons
+   from whatever book list was last shown — stayed visible and out of sync with the new section. */
+#bookorbit-pagination[hidden] { display: none; }
 
 /* Drawer toggle/close controls only exist for the off-canvas mobile layout — inert on desktop,
    where .opds-sidebar is always visible inline (see the @media block below). */

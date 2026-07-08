@@ -670,16 +670,24 @@ function triggerSync(userId, bookId) {
 // doesn't wait for a closed reading_sessions row, so it can fire on every chapter
 // change / manual KOSync push, not just when the reader is closed.
 async function pushProgress(userId, bookId, percentage) {
-  const ctx = getContext(userId);
-  if (!ctx) return;
-  const db = getDb();
-  const resolved = await resolveBooks(db, userId, ctx, { bookId });
-  const m = resolved[0];
-  if (!m || !m.boFileId) return;
-  try { if (!tokens.has(userId)) await login(userId, ctx); }
-  catch { return; }
-  const pct = Math.max(0, Math.min(100, Math.round(percentage * 10000) / 100));
-  await api(userId, ctx, 'POST', `/books/files/${m.boFileId}/progress`, { percentage: pct });
+  // Every exit point logs *why*, unlike before — this was entirely silent (no log on success,
+  // and triggerProgressPush's .catch(() => {}) swallowed any failure too), so there was no way
+  // to tell whether it was working, or silently skipping at one of the early returns below.
+  try {
+    const ctx = getContext(userId);
+    if (!ctx) { console.warn(`[bookorbit] user ${userId}: progress push skipped for book ${bookId} — BookOrbit not configured/enabled`); return; }
+    const db = getDb();
+    const resolved = await resolveBooks(db, userId, ctx, { bookId });
+    const m = resolved[0];
+    if (!m || !m.boFileId) { console.warn(`[bookorbit] user ${userId}: progress push skipped for book ${bookId} — not mapped to a BookOrbit file (book not in your BookOrbit library?)`); return; }
+    try { if (!tokens.has(userId)) await login(userId, ctx); }
+    catch (e) { console.warn(`[bookorbit] user ${userId}: progress push skipped for book ${bookId} — login failed: ${e.message}`); return; }
+    const pct = Math.max(0, Math.min(100, Math.round(percentage * 10000) / 100));
+    await api(userId, ctx, 'POST', `/books/files/${m.boFileId}/progress`, { percentage: pct });
+    console.log(`[bookorbit] user ${userId}: pushed live progress ${pct}% for book ${bookId}`);
+  } catch (e) {
+    console.warn(`[bookorbit] user ${userId}: progress push error for book ${bookId}:`, e.message);
+  }
 }
 
 function triggerProgressPush(userId, bookId, percentage) {

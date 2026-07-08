@@ -404,6 +404,10 @@ export class CXReader {
   get metadata()  { return this._book?.metadata ?? null; }
   get spine()     { return this._book?.spine ?? []; }
   get toc()       { return this._book?.toc ?? []; }
+  // Per-spine-item content weight (uncompressed file size as a text-length proxy), already
+  // computed at open() for the content-proportional percentage calculation — exposed so callers
+  // can estimate an unvisited chapter's page count proportionally instead of guessing flat.
+  get spineWeights() { return this._weights ?? []; }
   get spineIdx()  { return this._spineIdx; }
   get page()      { return this._paginator?.currentPage ?? 1; }
   get pageCount() { return this._paginator?.pageCount ?? 1; }
