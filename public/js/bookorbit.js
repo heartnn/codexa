@@ -578,6 +578,18 @@ async function openCollectionsModal(book) {
         await apiFetch(`/bookorbit/books/${book.boBookId}/collections/${collectionId}`, { method: 'DELETE' });
       toast.success(t('bookorbit.collections_saved'));
       close();
+      // Refresh the left list's book-count badges — they were fetched once when the Collections
+      // section was selected and never told about a membership change made through this modal.
+      // Safe to call while a collection's books are open: loadSublist only re-renders the left
+      // list and (per its own guard) skips the right-pane tiles whenever currentItem is set, so
+      // it won't touch the book grid the user is currently looking at.
+      if ((toAdd.length || toRemove.length) && currentSection === 'collections') {
+        loadSublist(currentSection, sublistQuery, sublistPage);
+      }
+      // If the currently-open collection lost or gained this book, refresh its grid too.
+      if (currentItem && (toAdd.includes(currentItem.id) || toRemove.includes(currentItem.id))) {
+        loadBooks(currentPage);
+      }
     } catch (err) {
       toast.error(t('common.err_prefix') + err.message);
       setButtonLoading(saveBtn, false);

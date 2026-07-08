@@ -1324,16 +1324,23 @@ export async function openInfoModal(book, startTab = '') {
         return;
       }
 
-      const cardHtml = (b) => `
-        <div class="imt-related-card" title="${escHtml(b.title || '')}">
+      const cardHtml = (b) => {
+        const boLink = bookorbitUrl ? `${bookorbitUrl.replace(/\/+$/, '')}/book/${b.boBookId}` : null;
+        const inner = `
           <div class="imt-related-cover-wrap">
             ${b.hasCover
               ? `<img class="imt-related-cover" src="/api/books/bookorbit-cover/${b.boBookId}?token=${token}" alt="" loading="lazy" />`
               : `<div class="imt-related-cover imt-related-cover-ph">\u{1F4D6}</div>`}
+            ${b.seriesIndex != null ? `<span class="imt-related-series-badge">#${escHtml(String(b.seriesIndex))}</span>` : ''}
+            ${boLink ? `<span class="imt-related-bo-badge" title="${escHtml(t('library.btn_view_bookorbit'))}"><img src="/images/bookorbit.svg" class="nav-icon nav-icon-bookorbit" alt=""></span>` : ''}
           </div>
           <div class="imt-related-title">${escHtml(b.title || '')}</div>
-          ${b.authors?.length ? `<div class="imt-related-author">${escHtml(b.authors.join(', '))}</div>` : ''}
-        </div>`;
+          ${b.authors?.length ? `<div class="imt-related-author">${escHtml(b.authors.join(', '))}</div>` : ''}`;
+
+        return boLink
+          ? `<a class="imt-related-card" href="${escHtml(boLink)}" target="_blank" rel="noopener" title="${escHtml(b.title || '')}">${inner}</a>`
+          : `<div class="imt-related-card" title="${escHtml(b.title || '')}">${inner}</div>`;
+      };
 
       const sections = [];
 

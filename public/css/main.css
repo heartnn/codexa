@@ -1661,8 +1661,9 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 }
 .imt-related-scroller::-webkit-scrollbar { height: 5px; }
 .imt-related-scroller::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
-.imt-related-card { flex: 0 0 auto; width: 96px; }
+.imt-related-card { flex: 0 0 auto; width: 96px; display: block; color: inherit; text-decoration: none; }
 .imt-related-cover-wrap {
+  position: relative;
   width: 96px;
   height: 144px;
   border-radius: var(--radius);
@@ -1672,6 +1673,28 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 }
 .imt-related-cover { width: 100%; height: 100%; object-fit: cover; display: block; }
 .imt-related-cover-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; opacity: .5; }
+.imt-related-series-badge {
+  position: absolute; top: 4px; right: 4px;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  background: var(--color-accent); color: #fff;
+  font-size: .68rem; font-weight: 700; line-height: 18px;
+  border-radius: 999px;
+  text-align: center;
+}
+html[data-lib-theme="eink"] .imt-related-series-badge { background: #111; }
+.imt-related-bo-badge {
+  position: absolute; bottom: 5px; right: 5px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.60);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: flex; align-items: center; justify-content: center;
+}
+.imt-related-bo-badge .nav-icon { width: 12px; height: 12px; }
+html[data-lib-theme="eink"] .imt-related-bo-badge {
+  background: rgba(255, 255, 255, 0.90);
+  border-color: rgba(0, 0, 0, 0.35);
+}
 .imt-related-title {
   font-size: .76rem;
   font-weight: 600;
