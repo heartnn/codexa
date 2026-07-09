@@ -1568,6 +1568,11 @@ html.no-flexgap .spread-buttons.page-anim-grid > * + * { margin-left: 0; }
   font-style: var(--sb-font-style, normal);
   color: var(--color-text-muted);
   user-select: none;
+  /* Own compositing layer so it isn't repainted/flashed by iOS Safari when the
+     sibling #epub-viewer (also its own layer, via will-change:transform) fades
+     or slides during a page-turn animation. */
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 .sb-bar-top    { top:    calc(var(--edge-pad-top, 0px) + 6px); }
 .sb-bar-bottom { bottom: calc(var(--sab) + 4px + var(--edge-pad-bottom, 0px)); }
@@ -1589,6 +1594,8 @@ html.no-flexgap .spread-buttons.page-anim-grid > * + * { margin-left: 0; }
   opacity: 0.3;
   pointer-events: none;
   z-index: 3;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 /* top separator: sits just below the top status bar text */
 .sb-sep-top    { top:    calc(var(--sb-font-size, 11px) + 17px + var(--edge-pad-top,    0px)); }

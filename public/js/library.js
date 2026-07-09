@@ -1,10 +1,10 @@
 import { apiFetch } from './api.js';
-import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
+import { toast, confirmDialog, setButtonLoading, showProgressToast, initSortMenuFor, resyncSortMenu } from './ui.js';
 import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts, setShelfBadge, setBookorbitNavVisible } from './sidebar.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
 import { openSyncModal, openOpdsBrowserAtFolder } from './opds.js';
-import { openBookorbitSyncModal, openBookorbitBrowserAt } from './bookorbit.js';
+import { openBookorbitSyncModal, openBookorbitBrowserAt, openBookorbitStaleDialog } from './bookorbit.js';
 import { clearProgress } from './progress-outbox.js';
 import {
   isOfflineSupported,
@@ -40,6 +40,18 @@ let _activeCardMenu = null; // { popup, btn, onOutsideClick, onEsc }
 let isOfflineMode    = false;
 let bookorbitEnabled = false; // whether BookOrbit extended sync is on, for the info modal's "Related" tab
 let bookorbitUrl     = '';    // BookOrbit server base URL, for the info modal's "View on BookOrbit" link
+
+// Re-checks /settings and refreshes every BookOrbit-dependent bit of UI state — called at
+// init and again whenever the tab regains focus, since bookorbit_sync_enabled/bookorbit_url
+// can change from Settings (or another tab/device) while this page sits open.
+async function refreshBookorbitState() {
+  try {
+    const s = await apiFetch('/settings');
+    bookorbitEnabled = !!s.bookorbit_sync_enabled;
+    bookorbitUrl = s.bookorbit_url || '';
+    setBookorbitNavVisible(bookorbitEnabled);
+  } catch { /* ignore — keep last-known state */ }
+}
 let offlineBooks     = [];        // IDB snapshot used when server is unreachable
 let downloadedIds    = new Set(); // bookIds currently stored offline
 let downloadingIds   = new Set(); // bookIds with an active download in progress
@@ -118,78 +130,6 @@ function sortBooks(list) {
     }); break;
   }
   return sorted;
-}
-
-// Builds a custom checkmark dropdown (button + list) driven by a hidden native <select> — the
-// select stays the single source of truth (its value changes and dispatches a real 'change'
-// event, so existing `select.addEventListener('change', ...)` code elsewhere needs no changes).
-// Parameterized so both the main library grid and the BookOrbit browser can share one
-// implementation instead of two near-identical copies.
-export function initSortMenuFor(selectId, btnId, labelId, listId) {
-  const select = document.getElementById(selectId);
-  const btn = document.getElementById(btnId);
-  const label = document.getElementById(labelId);
-  const list = document.getElementById(listId);
-  if (!select || !btn || !label || !list) return;
-
-  function syncLabel() {
-    const selected = select.options[select.selectedIndex];
-    label.textContent = selected?.textContent || '';
-    list.querySelectorAll('.sort-menu-option').forEach(opt => {
-      const active = opt.dataset.value === select.value;
-      opt.classList.toggle('active', active);
-      opt.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
-  }
-
-  function closeMenu() {
-    list.classList.add('hidden');
-    btn.setAttribute('aria-expanded', 'false');
-  }
-
-  function openMenu() {
-    list.classList.remove('hidden');
-    btn.setAttribute('aria-expanded', 'true');
-  }
-
-  list.innerHTML = '';
-  Array.from(select.options).forEach(option => {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'sort-menu-option';
-    item.dataset.value = option.value;
-    item.setAttribute('role', 'option');
-    item.setAttribute('aria-selected', option.selected ? 'true' : 'false');
-    item.innerHTML = `<span>${escHtml(option.textContent || '')}</span><span class="sort-menu-check">✓</span>`;
-    item.addEventListener('click', () => {
-      if (select.value === option.value) {
-        closeMenu();
-        return;
-      }
-      select.value = option.value;
-      syncLabel();
-      closeMenu();
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    list.appendChild(item);
-  });
-
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (list.classList.contains('hidden')) openMenu();
-    else closeMenu();
-  });
-  document.addEventListener('click', (e) => {
-    if (!list.classList.contains('hidden') && !e.target.closest('.sort-menu-wrap')) closeMenu();
-  });
-  document.addEventListener('touchend', (e) => {
-    if (!list.classList.contains('hidden') && !e.target.closest('.sort-menu-wrap')) closeMenu();
-  }, { passive: true });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeMenu();
-  });
-  select.addEventListener('change', syncLabel);
-  syncLabel();
 }
 
 // ── Render grid ───────────────────────────────────────────────────────────────
@@ -768,6 +708,7 @@ export async function openInfoModal(book, startTab = '') {
       <div class="info-modal-tabs" role="tablist">
         <button class="imt-tab active" data-tab="details" role="tab">${t('library.tab_details')}</button>
         ${isOfflineMode ? '' : `<button class="imt-tab" data-tab="shelves" role="tab">${t('library.tab_shelves')}</button>`}
+        ${(isOfflineMode || !bookorbitEnabled || !fullBook.bo_book_id) ? '' : `<button class="imt-tab" data-tab="collections" role="tab">${t('library.tab_collections')}</button>`}
         ${isOfflineMode ? '' : `<button class="imt-tab" data-tab="kosync" role="tab">${t('library.tab_kosync')}</button>`}
         <button class="imt-tab" data-tab="reading" role="tab">${t('library.tab_reading')}</button>
         ${(isOfflineMode || !bookorbitEnabled) ? '' : `<button class="imt-tab" data-tab="related" role="tab">${t('library.tab_related')}</button>`}
@@ -778,13 +719,20 @@ export async function openInfoModal(book, startTab = '') {
         <div class="imt-panel" id="imt-details">
           ${isOfflineMode ? '' : `
           <div class="imt-status-rating-row" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
-            <select id="imt-read-status" class="imt-status-select" aria-label="${t('library.status_title')}" style="padding:.3rem .5rem;border-radius:6px">
-              <option value="">${t('library.status_none')}</option>
-              <option value="want_to_read">${t('library.status_want')}</option>
-              <option value="reading">${t('library.status_reading')}</option>
-              <option value="read">${t('library.status_finished')}</option>
-              <option value="abandoned">${t('library.status_abandoned')}</option>
-            </select>
+            <div class="sort-menu-wrap imt-status-menu-wrap">
+              <select id="imt-read-status" class="sort-select hidden" aria-hidden="true" tabindex="-1">
+                <option value="">${t('library.status_none')}</option>
+                <option value="want_to_read">${t('library.status_want')}</option>
+                <option value="reading">${t('library.status_reading')}</option>
+                <option value="read">${t('library.status_finished')}</option>
+                <option value="abandoned">${t('library.status_abandoned')}</option>
+              </select>
+              <button type="button" id="imt-status-menu-btn" class="sort-menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="imt-status-menu-list" title="${escHtml(t('library.status_title'))}">
+                <span id="imt-status-menu-label"></span>
+                <span class="sort-menu-caret">▾</span>
+              </button>
+              <div id="imt-status-menu-list" class="sort-menu-list hidden" role="listbox" aria-label="${escHtml(t('library.status_title'))}"></div>
+            </div>
             <div class="imt-rating" id="imt-rating" role="radiogroup" aria-label="${t('library.rating_label')}" style="display:inline-flex;align-items:center;gap:.1rem">
               ${[1,2,3,4,5].map(n => `<button type="button" class="imt-star" data-val="${n}" aria-label="${n}" style="background:none;border:none;cursor:pointer;font-size:1.35rem;line-height:1;padding:0 .05rem;color:#ccc">★</button>`).join('')}
               <button type="button" class="imt-star-clear" id="imt-rating-clear" title="${t('library.rating_clear')}" style="background:none;border:none;cursor:pointer;font-size:1rem;color:var(--color-text-muted,#888);margin-left:.25rem">✕</button>
@@ -809,17 +757,29 @@ export async function openInfoModal(book, startTab = '') {
         ${isOfflineMode ? '' : `
         <div class="imt-panel" id="imt-shelves" style="display:none">
           ${allShelves.length
-            ? `<div class="info-modal-shelves">${allShelves.map(s => `
-                <label class="info-modal-shelf-row">
-                  <input type="checkbox" class="shelf-chk" value="${s.id}" ${bookShelfIds.has(s.id) ? 'checked' : ''} />
+            ? `<div class="info-modal-shelves">${allShelves.map(s => {
+                const isLinked = !!(s.opds_folder_url || s.bo_collection_id || s.bo_smart_scope_id);
+                return `
+                <label class="info-modal-shelf-row${isLinked ? ' info-modal-shelf-row-linked' : ''}" ${isLinked ? `title="${escHtml(t('library.shelf_linked_hint'))}"` : ''}>
+                  <input type="checkbox" class="shelf-chk" value="${s.id}" ${bookShelfIds.has(s.id) ? 'checked' : ''} ${isLinked ? 'disabled' : ''} />
                   <span>${escHtml(s.name)}</span>
                   <span class="shelf-book-count">(${s.book_count})</span>
-                </label>`).join('')}
+                  ${isLinked ? `<span class="shelf-lock-hint" aria-hidden="true">🔒</span>` : ''}
+                </label>`;
+              }).join('')}
               </div>
               <div style="margin-top:.75rem">
                 <button class="btn btn-primary btn-sm" id="info-modal-save">${t('library.btn_save_shelves')}</button>
               </div>`
             : `<div class="imt-empty">${t('library.info_no_shelves')}</div>`}
+        </div>`}
+
+        ${(isOfflineMode || !bookorbitEnabled || !fullBook.bo_book_id) ? '' : `
+        <div class="imt-panel" id="imt-collections" style="display:none">
+          <div id="imt-collections-list"><div class="imt-empty">${t('opds.loading')}</div></div>
+          <div style="margin-top:.75rem">
+            <button class="btn btn-primary btn-sm" id="imt-collections-save">${t('bookorbit.btn_save_collections')}</button>
+          </div>
         </div>`}
 
         ${isOfflineMode ? '' : `
@@ -847,9 +807,16 @@ export async function openInfoModal(book, startTab = '') {
             <div class="info-modal-kosync-divider"></div>
             <div style="font-size:.82rem;font-weight:600;margin-bottom:.35rem">${t('library.kosync_replace_epub')}</div>
             <div class="info-modal-kosync-opds-row">
-              <select class="info-modal-kosync-server-select" id="ik-server">
-                <option value="">${t('library.kosync_loading_servers')}</option>
-              </select>
+              <div class="sort-menu-wrap" style="min-width:140px">
+                <select id="ik-server" class="sort-select hidden" aria-hidden="true" tabindex="-1">
+                  <option value="">${t('library.kosync_loading_servers')}</option>
+                </select>
+                <button type="button" id="ik-server-menu-btn" class="sort-menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="ik-server-menu-list">
+                  <span id="ik-server-menu-label"></span>
+                  <span class="sort-menu-caret">▾</span>
+                </button>
+                <div id="ik-server-menu-list" class="sort-menu-list hidden" role="listbox"></div>
+              </div>
               <input class="info-modal-kosync-search-input" id="ik-q"
                 placeholder="${t('library.kosync_search_placeholder')}"
                 value="${escHtml(fullBook.title || '')}" />
@@ -881,6 +848,9 @@ export async function openInfoModal(book, startTab = '') {
     let curRating    = fullBook.rating || 0;
 
     if (statusSel) statusSel.value = fullBook.read_status || '';
+    // Same checkmark-dropdown widget as the library's sort menu (see initSortMenuFor), scoped to
+    // this modal's own backdrop instead of document so its listeners die with it on close.
+    initSortMenuFor('imt-read-status', 'imt-status-menu-btn', 'imt-status-menu-label', 'imt-status-menu-list', backdrop);
     const paintStars = (val) => stars.forEach(s => { s.style.color = Number(s.dataset.val) <= val ? '#f5c518' : '#ccc'; });
     paintStars(curRating);
 
@@ -915,12 +885,14 @@ export async function openInfoModal(book, startTab = '') {
   // ── Tab switching ─────────────────────────────────────────────────────────────
   let readingLoaded = false;
   let relatedLoaded = false;
+  let collectionsLoaded = false;
 
   const switchTab = (id) => {
     backdrop.querySelectorAll('.imt-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
     backdrop.querySelectorAll('.imt-panel').forEach(p => { p.style.display = p.id === `imt-${id}` ? '' : 'none'; });
     if (id === 'reading' && !readingLoaded) { readingLoaded = true; loadReadingTab(); }
     if (id === 'related' && !relatedLoaded) { relatedLoaded = true; loadRelatedTab(); }
+    if (id === 'collections' && !collectionsLoaded) { collectionsLoaded = true; loadCollectionsTab(); }
   };
 
   backdrop.querySelectorAll('.imt-tab').forEach(btn => {
@@ -1088,6 +1060,12 @@ export async function openInfoModal(book, startTab = '') {
     const ikValidate  = (val) => /^[0-9a-fA-F]{32}$/.test(val.trim());
     const ikShowError = (msg) => { ikError.textContent = msg; ikError.style.display = msg ? '' : 'none'; };
 
+    // Same checkmark-dropdown widget as the status field above — wires up the initial
+    // "loading servers…" placeholder now; ikLoadServers() below calls this again once the real
+    // server list arrives (safe: rebuilds the list from ikServer's current options each time, but
+    // only attaches the interaction listeners on the first call).
+    initSortMenuFor('ik-server', 'ik-server-menu-btn', 'ik-server-menu-label', 'ik-server-menu-list', backdrop);
+
     let serversLoaded = false;
     // BookOrbit is offered first (when enabled), above the user's OPDS catalogs — matches how
     // most users would already have BookOrbit configured as their primary source.
@@ -1101,6 +1079,7 @@ export async function openInfoModal(book, startTab = '') {
       } catch {
         ikServer.innerHTML = bookorbitOption || `<option value="">${t('library.kosync_no_servers')}</option>`;
       }
+      initSortMenuFor('ik-server', 'ik-server-menu-btn', 'ik-server-menu-label', 'ik-server-menu-list', backdrop);
     };
 
     backdrop.querySelectorAll('.imt-tab[data-tab="kosync"]').forEach(b => b.addEventListener('click', ikLoadServers));
@@ -1366,6 +1345,80 @@ export async function openInfoModal(book, startTab = '') {
     } catch (err) {
       inner.innerHTML = `<div class="imt-empty">${t('common.err_prefix')}${err.message}</div>`;
     }
+  }
+
+  // Lets the user assign/unassign this book to/from its BookOrbit collections without
+  // leaving Codexa — same checklist UX as bookorbit.js's standalone Collections editor,
+  // reused here so a book in a BookOrbit-linked shelf doesn't require a trip to the
+  // BookOrbit browser just to move it between collections.
+  async function loadCollectionsTab() {
+    const listEl = backdrop.querySelector('#imt-collections-list');
+    let collections = [];
+    try {
+      collections = await apiFetch(`/bookorbit/books/${fullBook.bo_book_id}/collections`);
+    } catch (err) {
+      listEl.innerHTML = `<div class="imt-empty">${escHtml(t('common.err_prefix') + err.message)}</div>`;
+      return;
+    }
+
+    if (!collections.length) {
+      listEl.innerHTML = `<div class="imt-empty">${t('bookorbit.no_collections')}</div>`;
+    } else {
+      listEl.innerHTML = `<div class="info-modal-shelves">${collections.map(c => `
+        <label class="info-modal-shelf-row">
+          <input type="checkbox" class="imt-coll-chk" value="${c.id}" ${c.member ? 'checked' : ''} />
+          <span>${escHtml(c.name)}</span>
+        </label>`).join('')}</div>`;
+    }
+
+    let originalMemberIds = new Set(collections.filter(c => c.member).map(c => c.id));
+
+    backdrop.querySelector('#imt-collections-save').addEventListener('click', async btnEvent => {
+      const saveBtn = btnEvent.currentTarget;
+      const checked = new Set([...backdrop.querySelectorAll('.imt-coll-chk:checked')].map(el => Number(el.value)));
+      const toAdd    = [...checked].filter(id => !originalMemberIds.has(id));
+      const toRemove = [...originalMemberIds].filter(id => !checked.has(id));
+      if (!toAdd.length && !toRemove.length) return;
+      setButtonLoading(saveBtn, true);
+      try {
+        for (const collectionId of toAdd)
+          await apiFetch(`/bookorbit/books/${fullBook.bo_book_id}/collections/${collectionId}`, { method: 'PUT' });
+        for (const collectionId of toRemove)
+          await apiFetch(`/bookorbit/books/${fullBook.bo_book_id}/collections/${collectionId}`, { method: 'DELETE' });
+        originalMemberIds = checked;
+        toast.success(t('bookorbit.collections_saved'));
+
+        // A removed collection linked to a shelf this book is currently in just went
+        // stale because of an edit Codexa itself made — ask right away instead of
+        // waiting for the next BookOrbit sync to notice.
+        const staleShelves = toRemove.length
+          ? allShelves.filter(s => toRemove.includes(s.bo_collection_id) && bookShelfIds.has(s.id))
+          : [];
+        for (const shelf of staleShelves) {
+          const otherShelfCount = bookShelfIds.size - 1;
+          bookShelfIds.delete(shelf.id);
+          const chk = backdrop.querySelector(`.shelf-chk[value="${shelf.id}"]`);
+          if (chk) chk.checked = false;
+          await new Promise(resolve => {
+            openBookorbitStaleDialog(
+              [{ id: fullBook.id, title: fullBook.title, author: fullBook.author, otherShelfCount }],
+              shelf.id, '', resolve
+            );
+          });
+        }
+        // If the last stale-dialog pass deleted the book outright (it wasn't in any
+        // other shelf), it no longer exists — close this now-stale modal.
+        if (staleShelves.length) {
+          try { await apiFetch(`/books/${fullBook.id}`); }
+          catch { backdrop.remove(); return; }
+        }
+
+        setButtonLoading(saveBtn, false);
+      } catch (err) {
+        toast.error(t('common.err_prefix') + err.message);
+        setButtonLoading(saveBtn, false);
+      }
+    });
   }
 }
 
@@ -2252,12 +2305,14 @@ export async function initLibrary() {
   window.addEventListener('online',  () => loadBooks().catch(() => {}));
   window.addEventListener('offline', () => loadBooks().catch(() => {}));
 
-  // Whether to show the info modal's "Related" (BookOrbit recommendations) tab.
-  apiFetch('/settings').then(s => {
-    bookorbitEnabled = !!s.bookorbit_sync_enabled;
-    bookorbitUrl = s.bookorbit_url || '';
-    setBookorbitNavVisible(bookorbitEnabled);
-  }).catch(() => {});
+  refreshBookorbitState();
+  // Settings can change in another tab (or on the server) while this one sits open —
+  // re-check whenever the tab regains focus so BookOrbit-dependent UI (nav icon, book
+  // info's Collections/Related tabs, the KOSync tab's source dropdown) picks up a
+  // newly-enabled/disabled state without needing a manual page reload.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshBookorbitState();
+  });
 
   // SW download progress messages
   if (isOfflineSupported) {
@@ -2479,22 +2534,6 @@ export async function initLibrary() {
   checkInterruptedSession();
 }
 
-// Custom sort-menu list items are plain DOM built once at init time (not a live binding to the
-// <select>'s options), so a language switch needs to manually re-copy each option's freshly
-// re-translated text into its corresponding menu item + the button label. Exported so both the
-// main library grid and BookOrbit's own sort menu can reuse it (see initSortMenuFor above).
-export function resyncSortMenu(selectId, listId, labelId) {
-  const select = document.getElementById(selectId);
-  const menuItems = document.querySelectorAll(`#${listId} .sort-menu-option`);
-  if (select && menuItems.length) {
-    Array.from(select.options).forEach((opt, i) => {
-      const item = menuItems[i];
-      if (item) item.querySelector('span')?.replaceWith(Object.assign(document.createElement('span'), { textContent: opt.textContent }));
-    });
-  }
-  const label = document.getElementById(labelId);
-  if (label && select) label.textContent = select.options[select.selectedIndex]?.textContent || '';
-}
 
 // Re-render language-dependent content when language changes
 document.addEventListener('langchange', () => {

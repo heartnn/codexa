@@ -106,6 +106,7 @@ async function enrichSearchResults(userId, ctx, rows) {
 function sortSearchItems(items, sortKey) {
   const arr = [...items];
   switch (sortKey) {
+    case 'default':    break; // leave BookOrbit's own title-ascending search order untouched
     case 'title_asc':  arr.sort((a, b) => (a.title || '').localeCompare(b.title || '')); break;
     case 'title_desc': arr.sort((a, b) => (b.title || '').localeCompare(a.title || '')); break;
     case 'author_asc': arr.sort((a, b) => (a.authors?.[0] || '').localeCompare(b.authors?.[0] || '')); break;
@@ -137,6 +138,9 @@ router.get('/authors',      proxyList('/authors'));
 // array (SORT_FIELDS in @bookorbit/types); series/authors use their own simpler `sort`+`order`
 // query params with a narrower field set (no `author`/`random`) — unsupported keys there just
 // fall back to that endpoint's own default (seriesIndex/asc for series, addedAt/desc for authors).
+// 'default' is intentionally absent from both maps below — some collections/smart scopes are
+// already curated in a specific order server-side, so this key deliberately sends no sort
+// override at all and just passes through whatever order BookOrbit itself returns.
 const BOOK_QUERY_SORT = {
   added_desc:  [{ field: 'addedAt', dir: 'desc' }],
   added_asc:   [{ field: 'addedAt', dir: 'asc' }],

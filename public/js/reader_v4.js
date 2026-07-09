@@ -1,5 +1,5 @@
 ﻿import { apiFetch, requireAuth, getToken } from './api.js';
-import { toast } from './ui.js';
+import { toast, initSortMenuFor, resyncSortMenu } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta, removeBook } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
@@ -3794,7 +3794,13 @@ function syncSettingsUi() {
   const hypEl  = document.getElementById('hyphenation-toggle');
   if (hypEl) hypEl.checked = prefs.hyphenation;
   const hypLangEl = document.getElementById('hyphen-lang-select');
-  if (hypLangEl) { hypLangEl.value = prefs.hyphenLang; hypLangEl.closest('.setting-row').style.display = prefs.hyphenation ? '' : 'none'; }
+  if (hypLangEl) {
+    hypLangEl.value = prefs.hyphenLang;
+    hypLangEl.closest('.setting-row').style.display = prefs.hyphenation ? '' : 'none';
+    // Setting .value directly doesn't fire 'change', so the custom dropdown's button label
+    // (a separate span, not the native select's own rendering) needs an explicit resync.
+    resyncSortMenu('hyphen-lang-select', 'hyphen-lang-menu-list', 'hyphen-lang-menu-label');
+  }
   const bionicEl = document.getElementById('bionic-reading-toggle');
   if (bionicEl) bionicEl.checked = prefs.bionicReading;
   const pgShadowEl = document.getElementById('page-gap-shadow-toggle');
@@ -4335,6 +4341,9 @@ function initSettingsUi() {
     prefs.hyphenLang = e.target.value;
     reapplyStyles(); persistPrefs();
   });
+  // Same checkmark-dropdown widget as the library's sort menu — this panel is static/persistent
+  // (built once, just shown/hidden), so the default document-scoped listeners are fine here.
+  initSortMenuFor('hyphen-lang-select', 'hyphen-lang-menu-btn', 'hyphen-lang-menu-label', 'hyphen-lang-menu-list');
   document.getElementById('bionic-reading-toggle')?.addEventListener('change', (e) => {
     prefs.bionicReading = e.target.checked;
     persistPrefs();

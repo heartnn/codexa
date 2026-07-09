@@ -219,6 +219,7 @@ html[data-lib-theme="eink"] .nav-icon-search            { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-edit              { content: url('/images/edit_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-book-upload       { content: url('/images/book_upload_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-statistics        { content: url('/images/statistics_bw.svg'); }
+
 html[data-lib-theme="eink"] .book-cover,
 html[data-lib-theme="eink"] .stats-book-cover,
 html[data-lib-theme="eink"] .info-modal-cover,
@@ -1915,16 +1916,6 @@ html[data-lib-theme="eink"] .imt-related-bo-badge {
   gap: .4rem;
   flex-wrap: wrap;
 }
-.info-modal-kosync-server-select {
-  flex: 0 0 auto;
-  max-width: 140px;
-  padding: .4rem .5rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-input-bg, rgba(255,255,255,.06));
-  color: var(--color-text);
-  font-size: .82rem;
-}
 .info-modal-kosync-search-input {
   flex: 1 1 0;
   min-width: 0;
@@ -2111,8 +2102,9 @@ html[data-lib-theme="eink"] .book-card-menu-btn:hover,
   width: 15px;
   height: 15px;
   flex-shrink: 0;
-  /* dark bg by default — invert SVG to white */
-  filter: brightness(0) invert(1);
+  /* These are full-colour illustrations, not flat monochrome glyphs — shown as-is
+     in every theme rather than filter-inverted (which just turns them into an
+     unreadable white blob on dark backgrounds). */
 }
 .bcm-icon-char {
   width: 15px;
@@ -2122,12 +2114,6 @@ html[data-lib-theme="eink"] .book-card-menu-btn:hover,
   justify-content: center;
   font-size: 13px;
   flex-shrink: 0;
-}
-/* Light themes: icons are dark, no invert needed */
-html[data-lib-theme="day"] .bcm-icon,
-html[data-lib-theme="eink"] .bcm-icon { filter: none; }
-@media (prefers-color-scheme: light) {
-  html:not([data-lib-theme]) .bcm-icon { filter: none; }
 }
 
 /* Offline badge on book card cover */
@@ -2196,6 +2182,10 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 }
 .info-modal-shelf-row input[type="checkbox"] { cursor: pointer; }
 .info-modal-shelf-row .shelf-book-count { color: var(--color-text-muted); font-size: .75rem; margin-left: auto; }
+.info-modal-shelf-row-linked { cursor: default; opacity: .7; }
+.info-modal-shelf-row-linked input[type="checkbox"] { cursor: not-allowed; }
+.info-modal-shelf-row-linked .shelf-book-count { margin-left: 0; }
+.shelf-lock-hint { font-size: .75rem; margin-left: .35rem; }
 .info-modal-footer { justify-content: space-between !important; flex-wrap: wrap; gap: .5rem; flex-shrink: 0; }
 
 /* ── Cover preview overlay ───────────────────────────────────────────────────── */
@@ -2374,6 +2364,11 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
   box-shadow: 0 16px 40px rgba(0,0,0,.28);
   padding: .35rem;
   backdrop-filter: blur(10px);
+  /* Harmless for the original short sort-order lists (never reached); needed once this widget
+     started getting reused for longer lists like the reader's 16-entry hyphenation language
+     picker, which would otherwise render as one very tall unscrollable popup. */
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
 }
 .sort-menu-option {
   width: 100%;
@@ -2503,6 +2498,15 @@ html[data-lib-theme="eink"] .bcm-icon { filter: none; }
 .opds-sidebar {
   width: 210px; flex-shrink: 0; border-right: 1px solid var(--color-border);
   display: flex; flex-direction: column; background: var(--color-surface); overflow: hidden;
+  /* On mobile this becomes a position:fixed, top:0/left:0 off-canvas drawer (see the @media
+     block below), which — unlike the normal in-flow desktop sidebar — sits outside the page's
+     usual safe-area-aware header and would otherwise render flush under the iOS status bar (and,
+     in landscape, under the notch cutout on the left edge). Matches .app-sidebar's own
+     unconditional top/left padding (~line 968-969): harmless on desktop/non-notched screens since
+     --sat/--sal are 0px there. Shared by both OPDS and BookOrbit (BookOrbit reuses this exact
+     class), so this one rule fixes both panels' drawers. */
+  padding-top: var(--sat, env(safe-area-inset-top, 0px));
+  padding-left: var(--sal, env(safe-area-inset-left, 0px));
 }
 .opds-sidebar-header {
   padding: .75rem 1rem; border-bottom: 1px solid var(--color-border);
@@ -2771,9 +2775,11 @@ html[data-lib-theme="eink"] .opds-card-peek-btn,
    wraps to its own line — no flex-wrap here, on purpose (see .opds-toolbar). */
 #bookorbit-title { font-weight: 600; font-size: .9rem; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Same checkmark dropdown as the main library grid (.sort-menu-wrap/.sort-menu-btn/etc., see
-   ~line 2281) — fixed at .sort-menu-wrap's own 160px min-width so it doesn't get squeezed by
-   the title/density-toggle competing for space in this tightly-packed toolbar row. */
-.bookorbit-sort-menu-wrap { flex-shrink: 0; max-width: 160px; }
+   ~line 2281) — floors at .sort-menu-wrap's own 160px min-width so it doesn't get squeezed by
+   the title/density-toggle competing for space in this tightly-packed toolbar row, but (unlike
+   an earlier max-width cap here) is otherwise free to grow to fit longer option labels (e.g.
+   "Default (server order)") on one line when the toolbar has room. */
+.bookorbit-sort-menu-wrap { flex-shrink: 0; min-width: 160px; }
 .bookorbit-nav { padding: .4rem; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
 .bookorbit-nav-item {
   display: block; width: 100%; text-align: left; padding: .55rem .75rem;

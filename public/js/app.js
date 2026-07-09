@@ -56,7 +56,16 @@ async function checkForUpdate(localVersion) {
 }
 
 function fetchAndShowVersion() {
-  fetch('/api/version').then(r => r.json()).then(({ version }) => {
+  fetch('/api/version').then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }).then(({ version }) => {
+    // A successful fetch is proof the API is reachable — clear is-offline here too, not
+    // just on the 'online' event. navigator.onLine can get stuck reporting false after
+    // some network transitions (VPN toggle, adapter change, sleep/resume) without the
+    // browser ever firing a matching 'online' event, which otherwise left this class
+    // (and the hidden version number) stuck indefinitely.
+    document.body.classList.remove('is-offline');
     document.title = `Codexa v${version}`;
     document.querySelectorAll('a.logo').forEach(logo => {
       const ver = logo.querySelector('.app-version');
@@ -77,6 +86,14 @@ function syncOfflineClass() {
 }
 window.addEventListener('online',  syncOfflineClass);
 window.addEventListener('offline', syncOfflineClass);
+
+// Self-heal a stuck is-offline: re-verify actual reachability whenever the tab regains
+// focus, instead of only reacting to the browser's (occasionally unreliable) online/offline
+// events. If the API is really reachable, fetchAndShowVersion's success path above clears
+// is-offline regardless of what navigator.onLine currently claims.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') fetchAndShowVersion();
+});
 syncOfflineClass();
 
 // Push any reading progress made while offline to the server + KOSync. Triggered

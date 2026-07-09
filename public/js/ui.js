@@ -100,3 +100,116 @@ export function setButtonLoading(btn, loading, originalLabel) {
     btn.disabled = false;
   }
 }
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Checkmark dropdown (button + list) ────────────────────────────────────────
+// Builds a custom checkmark dropdown (button + list) driven by a hidden native <select> — the
+// select stays the single source of truth (its value changes and dispatches a real 'change'
+// event, so existing `select.addEventListener('change', ...)` code elsewhere needs no changes).
+// Shared across the library grid's sort menu, the BookOrbit browser's sort menu, the book info
+// modal's status dropdown, and the reader's settings-panel dropdowns — one implementation instead
+// of near-identical copies in each.
+// `scope` is where the "click/tap outside to close" and Escape listeners get attached — defaults
+// to document for persistent toolbar/panel menus (main/BookOrbit sort, reader settings), which
+// only ever get initialized once per page load so a document-level listener is harmless. Pass a
+// modal's own backdrop element instead for a dropdown inside a dynamically created-and-destroyed
+// dialog (e.g. the book info modal's status dropdown): its markup is rebuilt from scratch on every
+// open, and document-level listeners would never get cleaned up, leaking three more on every
+// open. Listeners on the backdrop die with it when it's removed, so no cleanup call is needed.
+// Safe to call more than once for the same selectId/btnId/listId (e.g. after a <select>'s options
+// are (re)populated asynchronously, like the info modal's KOSync-server picker) — the list is
+// always rebuilt fresh from the select's current options, but the interaction listeners are only
+// ever attached once (tracked via btn.dataset.wired), so repeat calls don't stack duplicates.
+export function initSortMenuFor(selectId, btnId, labelId, listId, scope = document) {
+  const select = document.getElementById(selectId);
+  const btn = document.getElementById(btnId);
+  const label = document.getElementById(labelId);
+  const list = document.getElementById(listId);
+  if (!select || !btn || !label || !list) return;
+
+  function syncLabel() {
+    const selected = select.options[select.selectedIndex];
+    label.textContent = selected?.textContent || '';
+    list.querySelectorAll('.sort-menu-option').forEach(opt => {
+      const active = opt.dataset.value === select.value;
+      opt.classList.toggle('active', active);
+      opt.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function closeMenu() {
+    list.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function openMenu() {
+    list.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  list.innerHTML = '';
+  Array.from(select.options).forEach(option => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'sort-menu-option';
+    item.dataset.value = option.value;
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', option.selected ? 'true' : 'false');
+    item.innerHTML = `<span>${escHtml(option.textContent || '')}</span><span class="sort-menu-check">✓</span>`;
+    item.addEventListener('click', () => {
+      if (select.value === option.value) {
+        closeMenu();
+        return;
+      }
+      select.value = option.value;
+      syncLabel();
+      closeMenu();
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    list.appendChild(item);
+  });
+
+  if (btn.dataset.wired) { syncLabel(); return; }
+  btn.dataset.wired = '1';
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (list.classList.contains('hidden')) openMenu();
+    else closeMenu();
+  });
+  scope.addEventListener('click', (e) => {
+    if (!list.classList.contains('hidden') && !e.target.closest('.sort-menu-wrap')) closeMenu();
+  });
+  scope.addEventListener('touchend', (e) => {
+    if (!list.classList.contains('hidden') && !e.target.closest('.sort-menu-wrap')) closeMenu();
+  }, { passive: true });
+  scope.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenu();
+  });
+  select.addEventListener('change', syncLabel);
+  syncLabel();
+}
+
+// Custom sort-menu list items are plain DOM built once at init time (not a live binding to the
+// <select>'s options), so anything that changes the underlying select's value or option text
+// without going through the dropdown's own click handling — a language switch re-translating
+// option text, or code elsewhere setting `select.value` directly — needs this to manually re-copy
+// the current option text into the button label (and, for a language switch, into each menu item
+// too).
+export function resyncSortMenu(selectId, listId, labelId) {
+  const select = document.getElementById(selectId);
+  const menuItems = document.querySelectorAll(`#${listId} .sort-menu-option`);
+  if (select && menuItems.length) {
+    Array.from(select.options).forEach((opt, i) => {
+      const item = menuItems[i];
+      if (item) item.querySelector('span')?.replaceWith(Object.assign(document.createElement('span'), { textContent: opt.textContent }));
+    });
+  }
+  const label = document.getElementById(labelId);
+  if (label && select) label.textContent = select.options[select.selectedIndex]?.textContent || '';
+}

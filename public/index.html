@@ -535,6 +535,7 @@
             </div>
             <div class="sort-menu-wrap bookorbit-sort-menu-wrap">
               <select id="bookorbit-sort-select" class="sort-select hidden" aria-hidden="true" tabindex="-1">
+                <option value="default"     data-i18n="bookorbit.sort_default">Default (server order)</option>
                 <option value="added_desc"  data-i18n="bookorbit.sort_added_desc">Recently added</option>
                 <option value="added_asc"   data-i18n="bookorbit.sort_added_asc">Oldest added</option>
                 <option value="title_asc"   data-i18n="bookorbit.sort_title_asc">Title A–Z</option>
@@ -544,7 +545,7 @@
                 <option value="random"      data-i18n="bookorbit.sort_random">Random</option>
               </select>
               <button id="bookorbit-sort-menu-btn" class="sort-menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="bookorbit-sort-menu-list" data-i18n-title="bookorbit.sort_btn_title" title="Sort">
-                <span id="bookorbit-sort-menu-label">Recently added</span>
+                <span id="bookorbit-sort-menu-label" class="sort-menu-label">Recently added</span>
                 <span class="sort-menu-caret">▾</span>
               </button>
               <div id="bookorbit-sort-menu-list" class="sort-menu-list hidden" role="listbox" data-i18n-aria-label="bookorbit.sort_btn_title" aria-label="Sort"></div>

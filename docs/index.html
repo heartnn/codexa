@@ -152,6 +152,7 @@
             <li><a href="#details-actions" data-section="book-details" data-scroll="details-actions">Quick Actions</a></li>
             <li><a href="#details-tab"     data-section="book-details" data-scroll="details-tab">Details Tab</a></li>
             <li><a href="#details-shelves" data-section="book-details" data-scroll="details-shelves">Shelves Tab</a></li>
+            <li><a href="#details-collections" data-section="book-details" data-scroll="details-collections">Collections Tab</a></li>
             <li><a href="#details-kosync"  data-section="book-details" data-scroll="details-kosync">KOSync Tab</a></li>
             <li><a href="#details-reading" data-section="book-details" data-scroll="details-reading">Reading Tab</a></li>
           </ul>
@@ -1296,6 +1297,11 @@ data/<br>
         books are kept; only the OPDS connection is removed. The shelf reverts to a regular
         manually-managed shelf.
       </p>
+      <p>
+        While a shelf is linked, a book's checkbox for it is locked in the
+        <a href="#details-shelves" data-section="book-details" data-scroll="details-shelves">book
+        details Shelves tab</a> — unlink the shelf first if you need to remove a book from it by hand.
+      </p>
 
       <div class="callout">
         <strong>Shelf identity is preserved</strong>
@@ -1929,13 +1935,41 @@ data/<br>
       <h2 id="details-shelves">Shelves Tab</h2>
       <p>
         A list of all your shelves with checkboxes. Toggle a shelf to add or remove this book
-        from it. Changes are saved immediately.
+        from it, then click <strong>Save shelves</strong>.
+      </p>
+      <p>
+        Shelves linked to an <a href="#opds-linked" data-section="opds" data-scroll="opds-linked">OPDS
+        folder</a> or a <a href="#bol-shelfsync" data-section="bookorbit-library" data-scroll="bol-shelfsync">BookOrbit
+        collection/smart scope</a> show a &#128274; lock icon and their checkbox is disabled —
+        membership in a linked shelf is driven entirely by the linked source, not by hand. To move
+        a book out of a linked shelf, either change its membership at the source (see the
+        <strong>Collections Tab</strong> below, for BookOrbit) or unlink the shelf entirely from
+        its edit dialog.
       </p>
 
       <figure>
         <img src="screenshots/book_shelves.png" alt="Book details dialog with shelves tab">
         <figcaption>Book details shelves dialog</figcaption>
       </figure>
+
+      <h2 id="details-collections">Collections Tab</h2>
+      <p>
+        Shown for any book already matched to a <a href="#bookorbit-library" data-section="bookorbit-library">BookOrbit</a>
+        entry, regardless of whether it's in a linked shelf. A checklist of every BookOrbit
+        collection you have — tick or untick collections and click <strong>Save collections</strong>
+        to update membership directly on the BookOrbit server, the same editor available from a
+        book card in the <a href="#bol-collections" data-section="bookorbit-library" data-scroll="bol-collections">BookOrbit
+        browser</a>, without needing to leave this dialog.
+      </p>
+      <p>
+        If you untick a collection that's linked to one of this book's shelves, Codexa notices
+        immediately and asks whether to just unassign the book from that shelf or remove it from
+        your library outright — the same choice shown when a
+        <a href="#bol-shelfsync" data-section="bookorbit-library" data-scroll="bol-shelfsync">linked
+        sync</a> finds a book no longer in its source collection. Choosing to keep it leaves the
+        book in your library, unassigned from that shelf, still visible under <strong>All
+        Books</strong>.
+      </p>
 
       <h2 id="details-kosync">KOSync Tab</h2>
       <p>Shows the reading progress last received from your KOReader device:</p>
@@ -2567,7 +2601,10 @@ data/<br>
       </ul>
       <p>
         Selecting an item on the left shows its books on the right, using the same grid density
-        control and sort menu as the main library. Each book card shows a
+        control and sort menu as the main library, plus a <strong>Default</strong> option that
+        sends no sort override at all and just shows books in whatever order your BookOrbit server
+        returns them — handy for collections you've already hand-ordered on the server. Your
+        chosen sort order is remembered across visits. Each book card shows a
         <strong>Add to Codexa</strong> button (permanently downloads and imports the book) and, if
         it's already in your Codexa library, a badge instead. Cards for books already downloaded
         also link to the book's <a href="#book-details" data-section="book-details">Book Details</a>
@@ -2602,6 +2639,13 @@ data/<br>
         an <strong>Open in BookOrbit</strong> link and a resync button, and re-running the sync
         only downloads books that are new since last time. Unlink a shelf from the shelf's edit
         dialog with <strong>Unlink from BookOrbit</strong>; the shelf and its books are kept.
+      </p>
+      <p>
+        While a shelf is linked to a collection or smart scope, a book's checkbox for it is locked
+        in the <a href="#details-shelves" data-section="book-details" data-scroll="details-shelves">book
+        details Shelves tab</a> — use the
+        <a href="#details-collections" data-section="book-details" data-scroll="details-collections">Collections
+        tab</a> to change its collection membership instead, or unlink the shelf to manage it by hand.
       </p>
 
       <h2 id="bol-mobile">Mobile Drawer</h2>

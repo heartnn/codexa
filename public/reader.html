@@ -675,23 +675,30 @@
         </div>
         <div class="setting-row" id="hyphen-lang-row">
           <div class="setting-label" style="font-size:.8rem" data-i18n="reader.sb_hyphenation_lang">Jezik deljenja</div>
-          <select id="hyphen-lang-select" style="margin-top:.25rem">
-            <option value="" data-i18n="reader.sb_hyphenation_lang_auto">Samodejno (iz knjige)</option>
-            <option value="sl">Slovenščina (sl)</option>
-            <option value="en">English (en)</option>
-            <option value="de">Deutsch (de)</option>
-            <option value="fr">Français (fr)</option>
-            <option value="it">Italiano (it)</option>
-            <option value="es">Español (es)</option>
-            <option value="pt">Português (pt)</option>
-            <option value="nl">Nederlands (nl)</option>
-            <option value="pl">Polski (pl)</option>
-            <option value="cs">Čeština (cs)</option>
-            <option value="hr">Hrvatski (hr)</option>
-            <option value="sk">Slovenčina (sk)</option>
-            <option value="ru">Русский (ru)</option>
-            <option value="uk">Українська (uk)</option>
-          </select>
+          <div class="sort-menu-wrap" style="margin-top:.25rem;min-width:0">
+            <select id="hyphen-lang-select" class="sort-select hidden" aria-hidden="true" tabindex="-1">
+              <option value="" data-i18n="reader.sb_hyphenation_lang_auto">Samodejno (iz knjige)</option>
+              <option value="sl">Slovenščina (sl)</option>
+              <option value="en">English (en)</option>
+              <option value="de">Deutsch (de)</option>
+              <option value="fr">Français (fr)</option>
+              <option value="it">Italiano (it)</option>
+              <option value="es">Español (es)</option>
+              <option value="pt">Português (pt)</option>
+              <option value="nl">Nederlands (nl)</option>
+              <option value="pl">Polski (pl)</option>
+              <option value="cs">Čeština (cs)</option>
+              <option value="hr">Hrvatski (hr)</option>
+              <option value="sk">Slovenčina (sk)</option>
+              <option value="ru">Русский (ru)</option>
+              <option value="uk">Українська (uk)</option>
+            </select>
+            <button type="button" id="hyphen-lang-menu-btn" class="sort-menu-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="hyphen-lang-menu-list">
+              <span id="hyphen-lang-menu-label"></span>
+              <span class="sort-menu-caret">▾</span>
+            </button>
+            <div id="hyphen-lang-menu-list" class="sort-menu-list hidden" role="listbox"></div>
+          </div>
         </div>
 
         <!-- Bionic reading -->
@@ -1202,7 +1209,7 @@
        cross-origin requests are deliberately left uncached by sw.js, and third-party CDN
        resources aren't reliably available offline in iOS home-screen PWAs. -->
   <script src="/js/vendor/jszip.min.js"></script>
-  <script type="module" src="/js/reader_v4.js?v=br-v101"></script>
+  <script type="module" src="/js/reader_v4.js?v=br-v102"></script>
   <script src="/js/sw-register.js"></script>
 </body>
 </html>

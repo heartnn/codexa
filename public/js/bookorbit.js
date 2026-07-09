@@ -4,9 +4,9 @@
 // renderer) rather than reusing library.js's book-card component, which isn't
 // parameterized for a different data source / action set.
 import { apiFetch } from './api.js';
-import { toast, setButtonLoading } from './ui.js';
+import { toast, setButtonLoading, initSortMenuFor, resyncSortMenu } from './ui.js';
 import { t } from './i18n.js';
-import { reloadLibrary, openInfoModal, sanitizeHtml, initSortMenuFor, resyncSortMenu } from './library.js';
+import { reloadLibrary, openInfoModal, sanitizeHtml } from './library.js';
 import { reloadShelves } from './sidebar.js';
 import { showPanel } from './router.js';
 
@@ -50,7 +50,9 @@ const SECTION_LIST_PATH = {
 // ── DOM refs (assigned in initBookorbit) ──────────────────────────────────────
 let sublistEl, titleEl, sortSelect, searchRow, searchInput, btnSearch, loadingEl, gridEl, emptyEl, paginationEl;
 let sidebarEl, drawerToggleBtn, drawerCloseBtn, drawerOverlay;
-let currentSort = 'added_desc'; // ignored by 'search' (BookOrbit's book search has no sort control)
+// ignored by 'search' (BookOrbit's book search has no sort control). Persisted across
+// reloads/sessions (unlike currentSection/currentPage, which reset each visit).
+let currentSort = localStorage.getItem('br_bookorbit_sort') || 'added_desc';
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
@@ -831,7 +833,12 @@ export function openBookorbitSyncModal(source, id, name, existingShelfId = null)
 // are no longer in the linked BookOrbit collection/smart scope/library. Reuses the generic
 // opds.stale_* strings (title/keep/delete/also_in_shelves/deleted aren't source-specific) except
 // for the hint text, which has its own bookorbit.stale_hint wording.
-function openBookorbitStaleDialog(staleBooks, shelfId, syncSummary) {
+// syncSummary is optional — omitted (falsy) when this is called for a single-book
+// "immediate" removal (see library.js's Collections tab) rather than after a full shelf
+// sync, in which case the toast messages are skipped and onDone (if given) fires instead
+// so the caller can refresh its own already-open UI (reloadShelves/reloadLibrary alone
+// won't touch e.g. a book-info modal's in-memory shelf-membership state).
+export function openBookorbitStaleDialog(staleBooks, shelfId, syncSummary, onDone) {
   document.getElementById('bookorbit-stale-modal')?.remove();
   const otherCounts = new Map(staleBooks.map(b => [b.id, b.otherShelfCount || 0]));
 
@@ -861,7 +868,7 @@ function openBookorbitStaleDialog(staleBooks, shelfId, syncSummary) {
     </div>`;
 
   document.body.appendChild(backdrop);
-  const close = () => { backdrop.remove(); toast.success(syncSummary); };
+  const close = () => { backdrop.remove(); if (syncSummary) toast.success(syncSummary); onDone?.(); };
 
   backdrop.querySelector('#bo-stale-close').addEventListener('click', close);
   backdrop.querySelector('#bo-stale-skip').addEventListener('click', async () => {
@@ -873,7 +880,8 @@ function openBookorbitStaleDialog(staleBooks, shelfId, syncSummary) {
     backdrop.remove();
     reloadShelves();
     reloadLibrary();
-    toast.success(syncSummary);
+    if (syncSummary) toast.success(syncSummary);
+    onDone?.();
   });
   backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
 
@@ -894,7 +902,8 @@ function openBookorbitStaleDialog(staleBooks, shelfId, syncSummary) {
     backdrop.remove();
     reloadShelves();
     reloadLibrary();
-    toast.success(t('opds.stale_deleted', { summary: syncSummary, n: handled }));
+    if (syncSummary) toast.success(t('opds.stale_deleted', { summary: syncSummary, n: handled }));
+    onDone?.();
   });
 }
 
@@ -1005,7 +1014,12 @@ export async function initBookorbit() {
   if (_initialized) return;
   _initialized = true;
 
-  apiFetch('/settings').then(s => { bookorbitUrl = s.bookorbit_url || ''; }).catch(() => {});
+  const refreshBookorbitUrl = () => apiFetch('/settings').then(s => { bookorbitUrl = s.bookorbit_url || ''; }).catch(() => {});
+  refreshBookorbitUrl();
+  // The URL can change from Settings while this panel sits open in the background.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshBookorbitUrl();
+  });
 
   sublistEl    = document.getElementById('bookorbit-sublist');
   titleEl      = document.getElementById('bookorbit-title');
@@ -1034,6 +1048,7 @@ export async function initBookorbit() {
   initSortMenuFor('bookorbit-sort-select', 'bookorbit-sort-menu-btn', 'bookorbit-sort-menu-label', 'bookorbit-sort-menu-list');
   sortSelect.addEventListener('change', () => {
     currentSort = sortSelect.value;
+    try { localStorage.setItem('br_bookorbit_sort', currentSort); } catch { /* storage full/unavailable */ }
     if (currentItem || SECTION_SOURCE[currentSection] === 'search') loadBooks(0);
   });
   document.addEventListener('langchange', () => {

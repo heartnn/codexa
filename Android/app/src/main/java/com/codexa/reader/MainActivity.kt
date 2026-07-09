@@ -345,6 +345,20 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     return true
                 }
+                // Any navigation to a host other than the configured Codexa server
+                // (e.g. a "View on BookOrbit" link) should open in the system browser
+                // instead of loading inside this app's WebView.
+                val serverHost = getSavedUrl()?.let { Uri.parse(it).host }
+                val targetHost = request.url.host
+                if (serverHost != null && targetHost != null && !targetHost.equals(serverHost, ignoreCase = true)) {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                    } catch (e: Exception) {
+                        // No browser available — fall through and let the WebView try.
+                        return false
+                    }
+                    return true
+                }
                 return false
             }
 
