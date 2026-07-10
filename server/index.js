@@ -171,12 +171,21 @@ app.listen(PORT, () => {
 // infrequently and paces its requests. No-op for users without sync enabled.
 const { getDb } = require('./db');
 const BOOKORBIT_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+// Stagger each user's full sweep instead of firing them all in the same tick — every
+// opted-in user hitting BookOrbit at once (each doing several requests per book) was enough
+// concurrent load to trip 502s on BookOrbit's own end (seen in its logs as a failed
+// match-check right as the burst starts) and to slow down Codexa's own page loads while the
+// sweep was in flight. Spreading starts out over the interval keeps the same total work but
+// avoids the concurrent spike.
+const BOOKORBIT_SYNC_STAGGER_MS = 45 * 1000;
 setInterval(() => {
   let users;
   try {
     users = getDb().prepare('SELECT user_id FROM user_settings WHERE bookorbit_sync_enabled = 1').all();
   } catch { return; }
-  for (const u of users) bookorbitSync.triggerSync(u.user_id);
+  users.forEach((u, i) => {
+    setTimeout(() => bookorbitSync.triggerSync(u.user_id), i * BOOKORBIT_SYNC_STAGGER_MS).unref();
+  });
 }, BOOKORBIT_SYNC_INTERVAL_MS).unref();
 
 // ── Ephemeral "peek" book cleanup — background sweep ──────────────────────────

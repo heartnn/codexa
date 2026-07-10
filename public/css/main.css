@@ -723,9 +723,11 @@ html[data-lib-theme="eink"] .nav-icon-density-large   { content: url('/images/de
 .book-card:hover .book-card-actions { display: flex; }
 .book-card { position: relative; }
 .book-card-actions .btn-icon {
-  background: rgba(0, 0, 0, 0.65);
+  /* Accent-colored rather than translucent black — a dark cover under a dark overlay made
+     these nearly invisible until hovered. A solid, saturated color reads against any cover. */
+  background: rgba(233, 69, 96, 0.9);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.5);
   font-size: 1rem;
   width: 32px;
   height: 32px;
@@ -735,7 +737,7 @@ html[data-lib-theme="eink"] .nav-icon-density-large   { content: url('/images/de
   justify-content: center;
 }
 .book-card-actions .btn-icon:hover {
-  background: rgba(180, 30, 30, 0.85);
+  background: rgba(160, 20, 50, 0.95);
   border-color: rgba(255, 255, 255, 0.7);
   color: #fff;
 }
@@ -2002,8 +2004,10 @@ html[data-lib-theme="eink"] .imt-related-bo-badge {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.60);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  /* Matches .book-card-actions .btn-icon's accent background (~line 725) — same low-contrast
+     issue on very dark covers, same fix. */
+  background: rgba(233, 69, 96, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2680,13 +2684,15 @@ html[data-lib-theme="eink"] .nav-tile-count,
 .opds-card-cover-wrap:hover .opds-card-actions,
 .opds-card.tapped .opds-card-actions { display: flex; }
 .opds-card-actions .btn-icon {
-  background: rgba(0, 0, 0, 0.65); color: #fff; border-color: rgba(255, 255, 255, 0.4);
+  /* Matches .book-card-actions .btn-icon's accent background (~line 725) — translucent black
+     was nearly invisible over an already-dark cover. */
+  background: rgba(233, 69, 96, 0.9); color: #fff; border-color: rgba(255, 255, 255, 0.5);
   width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center;
   font-size: .95rem;
 }
-.opds-card-actions .btn-icon:hover { background: rgba(180, 30, 30, 0.85); border-color: rgba(255, 255, 255, 0.7); color: #fff; }
+.opds-card-actions .btn-icon:hover { background: rgba(160, 20, 50, 0.95); border-color: rgba(255, 255, 255, 0.7); color: #fff; }
 .opds-card-actions .btn-icon:disabled { opacity: .5; cursor: default; }
-.opds-card-actions .btn-icon:disabled:hover { background: rgba(0, 0, 0, 0.65); border-color: rgba(255, 255, 255, 0.4); }
+.opds-card-actions .btn-icon:disabled:hover { background: rgba(233, 69, 96, 0.9); border-color: rgba(255, 255, 255, 0.5); }
 .opds-card-actions .btn-icon .nav-icon { filter: brightness(0) invert(1); width: 16px; height: 16px; }
 .opds-card-actions .btn-icon.opds-btn-busy { opacity: .6; }
 html[data-lib-theme="eink"] .opds-card-actions .btn-icon,
@@ -2701,7 +2707,7 @@ html[data-lib-theme="eink"] .opds-card-actions .btn-icon .nav-icon,
 .opds-card-peek-btn {
   position: absolute; bottom: 5px; right: 5px;
   width: 26px; height: 26px; border-radius: 50%;
-  background: rgba(0, 0, 0, 0.60); border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(233, 69, 96, 0.9); border: 1px solid rgba(255, 255, 255, 0.5);
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity .15s; z-index: 2; text-decoration: none;
 }
@@ -2733,6 +2739,12 @@ html[data-lib-theme="eink"] .opds-card-peek-btn,
 @media (max-width: 768px) {
   .app-body.opds-active { overflow-x: hidden; overflow-y: auto; }
   #panel-opds:not([hidden]) { overflow-x: hidden; overflow-y: auto; }
+  /* .opds-layout's base rule (~line 2496) is overflow:hidden, sized for the desktop
+     internally-scrolling pane. Left un-overridden, it still clips anything taller than the
+     viewport at its own box — including the pagination bar after the book grid — even though
+     .opds-catalog/#catalog-grid below were already switched to overflow:visible for mobile's
+     page-level scroll. */
+  .opds-layout { overflow-x: hidden; overflow-y: visible; }
   .opds-catalog { overflow-x: hidden; overflow-y: visible; min-width: 0; max-width: 100%; }
   #catalog-grid { overflow: visible; min-width: 0; }
   #opds-book-grid { overflow: visible; min-width: 0; } /* column sizing comes from .book-grid/.density-* */
@@ -2879,13 +2891,15 @@ html[data-lib-theme="eink"] .opds-card-peek-btn,
 .bookorbit-card-cover-wrap:hover .bookorbit-card-actions,
 .bookorbit-card.tapped .bookorbit-card-actions { display: flex; }
 .bookorbit-card-actions .btn-icon {
-  background: rgba(0, 0, 0, 0.65); color: #fff; border-color: rgba(255, 255, 255, 0.4);
+  /* Matches .book-card-actions .btn-icon's accent background (~line 725) — translucent black
+     was nearly invisible over an already-dark cover. */
+  background: rgba(233, 69, 96, 0.9); color: #fff; border-color: rgba(255, 255, 255, 0.5);
   width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center;
   font-size: .95rem;
 }
-.bookorbit-card-actions .btn-icon:hover { background: rgba(180, 30, 30, 0.85); border-color: rgba(255, 255, 255, 0.7); color: #fff; }
+.bookorbit-card-actions .btn-icon:hover { background: rgba(160, 20, 50, 0.95); border-color: rgba(255, 255, 255, 0.7); color: #fff; }
 .bookorbit-card-actions .btn-icon:disabled { opacity: .5; cursor: default; }
-.bookorbit-card-actions .btn-icon:disabled:hover { background: rgba(0, 0, 0, 0.65); border-color: rgba(255, 255, 255, 0.4); }
+.bookorbit-card-actions .btn-icon:disabled:hover { background: rgba(233, 69, 96, 0.9); border-color: rgba(255, 255, 255, 0.5); }
 .bookorbit-card-actions .btn-icon .nav-icon { filter: brightness(0) invert(1); width: 16px; height: 16px; }
 .bookorbit-card-actions .btn-icon.bookorbit-btn-busy { opacity: .6; }
 html[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon,
@@ -2901,7 +2915,7 @@ html[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon .nav-icon,
 .bookorbit-card-peek-btn {
   position: absolute; bottom: 5px; right: 5px;
   width: 26px; height: 26px; border-radius: 50%;
-  background: rgba(0, 0, 0, 0.60); border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(233, 69, 96, 0.9); border: 1px solid rgba(255, 255, 255, 0.5);
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity .15s; z-index: 2; text-decoration: none;
 }
@@ -2944,6 +2958,13 @@ html[data-lib-theme="eink"] .bookorbit-card-peek-btn,
 @media (max-width: 768px) {
   .app-body.bookorbit-active { overflow-x: hidden; overflow-y: auto; }
   #panel-bookorbit:not([hidden]) { overflow-x: hidden; overflow-y: auto; }
+  /* Mirrors OPDS's own mobile overrides (~line 2736/2740) — .opds-layout/.opds-catalog are
+     shared classes whose base rules (~line 2496/2541) are both overflow:hidden, sized for the
+     desktop internally-scrolling pane. Without these, #bookorbit-grid's own overflow:visible
+     below is clipped one/two levels up anyway, hiding anything past the viewport height —
+     including the pagination bar after the book grid. */
+  .opds-layout { overflow-x: hidden; overflow-y: visible; }
+  .opds-catalog { overflow-x: hidden; overflow-y: visible; min-width: 0; max-width: 100%; }
   /* min-width:0 lets the grid shrink below its content's min-content width — without it,
      a flex child defaults to min-width:auto and the compact 3-column layout overflows
      instead of shrinking, clipping the last card (mirrors #catalog-grid's fix above). */
@@ -3153,6 +3174,14 @@ html[data-lib-theme="eink"] .sort-menu-option:hover,
 html[data-lib-theme="eink"] .sort-menu-option:focus-visible,
 .sidebar-layout[data-lib-theme="eink"] .sort-menu-option:hover,
 .sidebar-layout[data-lib-theme="eink"] .sort-menu-option:focus-visible { background: #f0f0f0; }
+/* .active's own eink rule (above, ~line 114) sets white text on a black background — this
+   plain :hover rule has the same specificity and comes later, so hovering the already-selected
+   entry left the background near-white while the text stayed white (invisible). Needs a
+   background dark enough for white text, not the light hover shade meant for unselected rows. */
+html[data-lib-theme="eink"] .sort-menu-option.active:hover,
+html[data-lib-theme="eink"] .sort-menu-option.active:focus-visible,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-option.active:hover,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-option.active:focus-visible { background: #333; }
 
 /* Language dropdown */
 html[data-lib-theme="eink"] .lang-menu-btn,
@@ -3174,6 +3203,12 @@ html[data-lib-theme="eink"] .lang-menu-option:hover,
 html[data-lib-theme="eink"] .lang-menu-option:focus-visible,
 .sidebar-layout[data-lib-theme="eink"] .lang-menu-option:hover,
 .sidebar-layout[data-lib-theme="eink"] .lang-menu-option:focus-visible { background: #f0f0f0; }
+/* Same fix as .sort-menu-option.active:hover above — the plain :hover rule's light background
+   left the .active rule's white text (~line 104) invisible on the selected row. */
+html[data-lib-theme="eink"] .lang-menu-option.active:hover,
+html[data-lib-theme="eink"] .lang-menu-option.active:focus-visible,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-option.active:hover,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-option.active:focus-visible { background: #333; }
 
 /* Edit mode button (btn-secondary → white/black) */
 html[data-lib-theme="eink"] #edit-mode-btn,

@@ -588,7 +588,11 @@ figcaption {
   background: color-mix(in srgb, #f59e0b 8%, var(--surface));
 }
 
-.callout strong { display: block; margin-bottom: 4px; }
+/* Only the label strong (always the first child, e.g. "Prerequisite") is a heading line —
+   :first-child, not a blanket `strong` selector, so a further <strong> used for inline emphasis
+   in the callout's body text (e.g. "v2.1.0 or higher") stays inline instead of also being
+   forced onto its own line and breaking the surrounding sentence apart. */
+.callout strong:first-child { display: block; margin-bottom: 4px; }
 
 /* ─── Feature List ───────────────────────────────────────────────────────── */
 
@@ -730,17 +734,24 @@ mark.current-match {
   counter-reset: step;
 }
 
+/* Not display:flex on the <li> itself — its content is plain inline text mixed with <strong>/
+   <code>/<a>, and flexbox turns every one of those (including each anonymous text run between
+   them) into its own separate flex item, splitting a single sentence into a jumble of
+   individually-wrapped boxes instead of one flowing paragraph. The number bubble is positioned
+   via ::before + padding-left instead, leaving the <li>'s actual content in normal flow. */
 .steps li {
-  display: flex;
-  gap: 12px;
+  position: relative;
+  padding-left: 38px;
   margin-bottom: 12px;
   counter-increment: step;
-  align-items: flex-start;
+  min-height: 26px;
 }
 
 .steps li::before {
   content: counter(step);
-  flex-shrink: 0;
+  position: absolute;
+  left: 0;
+  top: 1px;
   width: 26px;
   height: 26px;
   background: var(--accent);
@@ -751,7 +762,6 @@ mark.current-match {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 1px;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────────────── */
