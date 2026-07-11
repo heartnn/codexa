@@ -2138,6 +2138,30 @@ html[data-lib-theme="eink"] .book-card-menu-btn:hover,
   pointer-events: none;
 }
 
+/* Series-number badge, bottom-left of the cover — a slightly-transparent black rounded rectangle
+   with white text (like a Goodreads/store-badge style corner tag), not a pill/button. Opposite
+   corner from the peek button so the two never collide. Mirrored by .opds-card-series-badge/
+   .bookorbit-card-series-badge below. */
+.book-series-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  padding: .15rem .45rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.3;
+  z-index: 2;
+  pointer-events: none;
+}
+html[data-lib-theme="eink"] .book-series-badge,
+.sidebar-layout[data-lib-theme="eink"] .book-series-badge {
+  background: rgba(255, 255, 255, 0.85);
+  color: #111;
+}
+
 /* Offline button in card actions */
 .offline-btn { opacity: .85; }
 .offline-btn:hover { opacity: 1; }
@@ -2542,7 +2566,15 @@ html[data-lib-theme="eink"] .book-card-menu-btn:hover,
 .sidebar-layout[data-lib-theme="eink"] .server-btn.unreachable .server-name::before { background: currentColor; }
 .server-name { display: block; font-size: .875rem; font-weight: 500; }
 .server-url { display: block; font-size: .72rem; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.opds-catalog { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.opds-catalog {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  /* Matches .opds-sidebar's own safe-area padding-top (~line 2512) — without it, the sidebar's
+     header text sits safely below a top cutout/status-bar overlay while the catalog toolbar next
+     to it has no such offset and starts flush at the very top, so its title/breadcrumb text can
+     get obscured on devices that report a non-zero safe-area-inset-top even outside the mobile
+     off-canvas layout (seen on an older Android tablet in landscape). Shared by BookOrbit too. */
+  padding-top: var(--sat, env(safe-area-inset-top, 0px));
+}
 .opds-toolbar {
   display: flex; align-items: center; gap: .5rem; padding: .6rem 1rem;
   border-bottom: 1px solid var(--color-border); background: var(--color-surface); flex-shrink: 0;
@@ -2720,6 +2752,20 @@ html[data-lib-theme="eink"] .opds-card-actions .btn-icon .nav-icon,
 html[data-lib-theme="eink"] .opds-card-peek-btn,
 .sidebar-layout[data-lib-theme="eink"] .opds-card-peek-btn {
   background: rgba(255, 255, 255, 0.90); border-color: rgba(0, 0, 0, 0.55);
+}
+
+/* Series-number badge, bottom-left of the cover — mirrors .book-series-badge (main.css ~2124)
+   exactly, opposite corner from the peek button. */
+.opds-card-series-badge {
+  position: absolute; bottom: 6px; left: 6px;
+  padding: .15rem .45rem; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff; font-size: .72rem; font-weight: 700; line-height: 1.3;
+  z-index: 2; pointer-events: none;
+}
+html[data-lib-theme="eink"] .opds-card-series-badge,
+.sidebar-layout[data-lib-theme="eink"] .opds-card-series-badge {
+  background: rgba(255, 255, 255, 0.85); color: #111;
 }
 
 /* Drawer toggle/close controls only exist for the off-canvas mobile layout — inert on desktop,
@@ -2928,6 +2974,20 @@ html[data-lib-theme="eink"] .bookorbit-card-actions .btn-icon .nav-icon,
 html[data-lib-theme="eink"] .bookorbit-card-peek-btn,
 .sidebar-layout[data-lib-theme="eink"] .bookorbit-card-peek-btn {
   background: rgba(255, 255, 255, 0.90); border-color: rgba(0, 0, 0, 0.55);
+}
+
+/* Series-number badge, bottom-left of the cover — mirrors .book-series-badge (main.css ~2124)
+   exactly, opposite corner from the peek button. */
+.bookorbit-card-series-badge {
+  position: absolute; bottom: 6px; left: 6px;
+  padding: .15rem .45rem; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff; font-size: .72rem; font-weight: 700; line-height: 1.3;
+  z-index: 2; pointer-events: none;
+}
+html[data-lib-theme="eink"] .bookorbit-card-series-badge,
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-series-badge {
+  background: rgba(255, 255, 255, 0.85); color: #111;
 }
 
 #bookorbit-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--color-text-muted); }

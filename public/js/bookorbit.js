@@ -339,6 +339,7 @@ function renderGrid(items) {
     card.innerHTML = `
       <div class="bookorbit-card-cover-wrap">
         ${coverHtml}
+        ${book.seriesIndex != null ? `<div class="bookorbit-card-series-badge">#${escHtml(book.seriesIndex)}</div>` : ''}
         <div class="bookorbit-card-actions"></div>
       </div>
       <div class="bookorbit-card-info">

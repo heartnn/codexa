@@ -168,6 +168,7 @@ function _makeCard(book, globalIndex, isEink) {
     <div class="book-cover-area">
       ${cover}
       ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
+      ${book.series_number ? `<div class="book-series-badge">#${escHtml(book.series_number)}</div>` : ''}
       <a class="book-card-peek-btn" href="/reader.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
     </div>
     <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
