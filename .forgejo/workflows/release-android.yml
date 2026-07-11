@@ -1,0 +1,135 @@
+name: Release Android APK
+
+# Official release build — triggered only by pushing a version tag (git tag vX.Y.Z; git push
+# codeberg vX.Y.Z), independent of build-android.yml's CI build. Deliberately has NO path filter:
+# an official release usually tags a commit already pushed to main earlier, whose diff often
+# touches nothing under Android/** — a path filter here would cause the release job to silently
+# skip on exactly the pushes that matter most.
+#
+# Mirrored from .github/workflows/release-android.yml — keep the two in sync.
+# Release publishing uses actions/forgejo-release (code.forgejo.org) instead of
+# softprops/action-gh-release, since the latter talks to the GitHub REST API directly and
+# will not work against a Forgejo/Codeberg instance. Requires a RELEASE_TOKEN secret: a
+# Codeberg access token (Settings → Applications → Generate New Token) with repo write scope.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: https://github.com/actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: https://github.com/actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: https://github.com/gradle/actions/setup-gradle@v3
+
+      # Self-hosted runner images (e.g. catthehacker/ubuntu) don't ship the Android SDK the
+      # way GitHub's hosted ubuntu-latest does — bootstrap it explicitly so the build doesn't
+      # depend on whatever happens to be baked into the runner's docker image.
+      - name: Install Android SDK
+        run: |
+          export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -sSL -o /tmp/cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
+            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+
+      - name: Build debug APK
+        working-directory: Android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      # ── Release APK ─────────────────────────────────────────────────────────
+      # Priority 1: KEYSTORE_FILE secret → Google Play / production key (base64)
+      # Priority 2: DEV_KEYSTORE_* secrets → persistent dev key stored in secrets
+      # Priority 3: No secrets → generate a fresh throwaway keystore on the fly
+      - name: Prepare release keystore
+        id: keystore
+        working-directory: Android
+        env:
+          KEYSTORE_FILE_B64:      ${{ secrets.KEYSTORE_FILE }}
+          DEV_KEYSTORE_FILE_B64:  ${{ secrets.DEV_KEYSTORE_FILE }}
+          DEV_KEYSTORE_PASSWORD:  ${{ secrets.DEV_KEYSTORE_PASSWORD }}
+          DEV_KEY_ALIAS:          ${{ secrets.DEV_KEY_ALIAS }}
+          DEV_KEY_PASSWORD:       ${{ secrets.DEV_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_FILE_B64" ]; then
+            echo "Using production keystore from KEYSTORE_FILE secret"
+            echo "$KEYSTORE_FILE_B64" | base64 -d > /tmp/release.jks
+            echo "DEV_KEYSTORE_FILE=/tmp/release.jks"          >> $GITHUB_ENV
+            echo "DEV_KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "DEV_KEY_ALIAS=${{ secrets.KEY_ALIAS }}"      >> $GITHUB_ENV
+            echo "DEV_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          elif [ -n "$DEV_KEYSTORE_FILE_B64" ]; then
+            echo "Using dev keystore from DEV_KEYSTORE_FILE secret"
+            echo "$DEV_KEYSTORE_FILE_B64" | grep -v '^-' | tr -d '\r\n ' | base64 -d > /tmp/release.jks
+            echo "DEV_KEYSTORE_FILE=/tmp/release.jks"                  >> $GITHUB_ENV
+            echo "DEV_KEYSTORE_PASSWORD=$DEV_KEYSTORE_PASSWORD"        >> $GITHUB_ENV
+            echo "DEV_KEY_ALIAS=$DEV_KEY_ALIAS"                        >> $GITHUB_ENV
+            echo "DEV_KEY_PASSWORD=$DEV_KEY_PASSWORD"                  >> $GITHUB_ENV
+          else
+            echo "No keystore secrets found — generating throwaway keystore"
+            keytool -genkeypair \
+              -keystore /tmp/release.jks \
+              -alias codexa-release \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass codexa-ci-store \
+              -keypass codexa-ci-key \
+              -dname "CN=Codexa CI, OU=Codexa, O=Codexa, L=Unknown, ST=Unknown, C=SI"
+            echo "DEV_KEYSTORE_FILE=/tmp/release.jks"  >> $GITHUB_ENV
+            echo "DEV_KEYSTORE_PASSWORD=codexa-ci-store" >> $GITHUB_ENV
+            echo "DEV_KEY_ALIAS=codexa-release"          >> $GITHUB_ENV
+            echo "DEV_KEY_PASSWORD=codexa-ci-key"        >> $GITHUB_ENV
+          fi
+
+      - name: Build release APK
+        working-directory: Android
+        run: ./gradlew assembleRelease
+
+      - name: Upload debug APK
+        uses: https://github.com/actions/upload-artifact@v4
+        with:
+          name: codexa-reader-debug
+          path: Android/app/build/outputs/apk/debug/*.apk
+          retention-days: 90
+
+      - name: Upload release APK
+        uses: https://github.com/actions/upload-artifact@v4
+        with:
+          name: codexa-reader-release
+          path: Android/app/build/outputs/apk/release/*.apk
+          retention-days: 90
+
+      - name: Collect assets for release
+        run: |
+          mkdir -p /tmp/release-assets
+          cp Android/app/build/outputs/apk/debug/*.apk /tmp/release-assets/
+          cp Android/app/build/outputs/apk/release/*.apk /tmp/release-assets/
+
+      - name: Attach APKs to Codeberg Release
+        uses: https://code.forgejo.org/actions/forgejo-release@v2
+        with:
+          direction: upload
+          url: https://codeberg.org
+          repo: thj/codexa
+          token: ${{ secrets.RELEASE_TOKEN }}
+          tag: ${{ github.ref_name }}
+          release-dir: /tmp/release-assets
