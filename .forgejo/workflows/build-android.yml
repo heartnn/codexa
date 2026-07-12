@@ -41,13 +41,23 @@ jobs:
       # depend on whatever happens to be baked into the runner's docker image.
       - name: Install Android SDK
         run: |
+          set -x
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          curl -sSL -o /tmp/cmdline-tools.zip \
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" "$ANDROID_SDK_ROOT/licenses"
+          curl -sSL --fail -o /tmp/cmdline-tools.zip \
             https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
           mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null
+
+          # Pre-accept SDK licenses by writing the known hashes directly, instead of
+          # `yes | sdkmanager --licenses`: once sdkmanager stops reading stdin, `yes` gets
+          # SIGPIPE'd (exit 141), and pipefail turns that into a failed step even though the
+          # licenses were accepted fine.
+          printf '24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n8933bad161af4178b1185d1a37fbf41ea5269c55\n' \
+            > "$ANDROID_SDK_ROOT/licenses/android-sdk-license"
+          printf '84831b9409646a918e30573bab4c9c91346d8abd\n' \
+            > "$ANDROID_SDK_ROOT/licenses/android-sdk-preview-license"
+
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
             "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
