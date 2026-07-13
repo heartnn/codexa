@@ -4882,29 +4882,64 @@ async function syncOnOpen(localProgress) {
   return null;
 }
 
-// Called by the Android app when the network becomes available (wake from standby /
-// reconnect). Re-runs the same sync-on-open flow so the reader can jump to a position
-// advanced on another device while this one was offline / sleeping.
+// Called on reconnect (Android wake-from-standby, the 'online' event, or the native
+// Android hook). Unlike syncOnOpen() (used at book-open time, which prompts via a
+// confirmation dialog before jumping across devices), this path is fully automatic —
+// the user just watched the status indicator flip to "online" and expects the reader
+// to settle itself with no prompt: push our position if we're ahead, silently jump if
+// the remote is ahead, do nothing if they already match.
 async function networkRestoreSync() {
   if (!currentBook || !isReady) return;
   try {
-    const localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
-    const syncTarget = await syncOnOpen(localProgress);
-    if (syncTarget?.percentage == null && !syncTarget?.progress) return;
-    if (_cxReader && syncTarget?.percentage != null) _cxReader.seekToPercent(syncTarget.percentage);
+    const docKey = externalDocKey();
+    const [extResult, intResult] = await Promise.allSettled([
+      fetchRemoteProgress(docKey),
+      fetchInternalProgress(docKey),
+    ]);
+    const ext = extResult.status === 'fulfilled' ? extResult.value : null;
+    const int = intResult.status === 'fulfilled' ? intResult.value : null;
+    let best = null;
+    if (ext?.progress) best = ext;
+    if (int?.progress && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
+    if (!best?.progress) { log('[kosync] networkRestoreSync: no remote progress found'); return; }
+
+    const remotePct = best.percentage || 0;
+    if (remotePct > bestKnownRemotePct) bestKnownRemotePct = remotePct;
+
+    if (remotePct <= currentPct + 0.005) {
+      // We're ahead or tied — nothing to pull. flushProgressOutbox (called by the trigger
+      // below, before this runs) already pushed anything queued while genuinely offline;
+      // the normal saveProgress high-water logic covers the rest. Equal case: no-op.
+      log('[kosync] networkRestoreSync: local at/ahead of remote (' + Math.round(currentPct * 100) + '% vs ' + Math.round(remotePct * 100) + '%) — nothing to pull');
+      return;
+    }
+
+    log('[kosync] networkRestoreSync: auto-pulling remote position', Math.round(remotePct * 100) + '%');
+    if (best.progress.startsWith('/body/DocFragment[')) lastKnownXPointer = best.progress;
+    if (_cxReader) {
+      await _cxReader.goToPct(remotePct);
+      _cxReader.seekToPercent(remotePct);
+      currentCfi = _cxReader.makeCfi();
+    }
+    currentPct = remotePct;
+    lastSyncedCfi = currentCfi;
   } catch (e) { warn('[kosync] networkRestoreSync failed:', e.message); }
 }
 window.__codexaNetworkRestore = () => triggerNetworkRestore('native');
 
-// Throttled entry point for the auto KOSync pull. Several triggers can fire close together
-// (the 'online' event, the wake/visibility path, the native Android hook), so coalesce them.
+// Throttled entry point for the auto KOSync push/pull. Several triggers can fire close
+// together (the 'online' event, the wake/visibility path, the native Android hook), so
+// coalesce them. Flushing the offline-progress outbox runs regardless of whether this
+// reader's book has finished loading yet; the pull comparison needs a loaded book, so it's
+// gated inside networkRestoreSync itself.
 let _lastNetRestore = 0;
 function triggerNetworkRestore(reason) {
-  if (!currentBook || !isReady || !navigator.onLine) return;
+  if (!navigator.onLine) return;
   const now = Date.now();
   if (now - _lastNetRestore < 3000) return; // coalesce near-simultaneous triggers
   _lastNetRestore = now;
   log('[kosync] networkRestore trigger:', reason);
+  flushProgressOutbox().catch(() => {});
   networkRestoreSync().catch(() => {});
 }
 
@@ -4922,8 +4957,7 @@ function scheduleWakeSync() {
 }
 
 window.addEventListener('online', () => {
-  // Flush any offline reading progress (this book or others) to server + KOSync.
-  flushProgressOutbox().catch(() => {});
+  // Offline-progress outbox flush + KOSync pull both happen inside triggerNetworkRestore now.
   if (!currentBook) return;
   syncOfflineBookmarks(currentBook.id).catch(() => {});
   syncOfflineAnnotations(currentBook.id).catch(() => {});

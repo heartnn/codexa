@@ -40,7 +40,7 @@ function saveNavState() {
 }
 
 function setGroupOpen(sectionId, open) {
-  const li = document.querySelector(`#nav-links > ul > li[data-group-id="${sectionId}"]`);
+  const li = document.querySelector(`#nav-groups li[data-group-id="${sectionId}"]`);
   if (!li) return;
   li.classList.toggle('open', open);
   if (open) openSections.add(sectionId);
@@ -49,7 +49,7 @@ function setGroupOpen(sectionId, open) {
 }
 
 function toggleGroup(sectionId) {
-  const li = document.querySelector(`#nav-links > ul > li[data-group-id="${sectionId}"]`);
+  const li = document.querySelector(`#nav-groups li[data-group-id="${sectionId}"]`);
   if (!li) return;
   setGroupOpen(sectionId, !li.classList.contains('open'));
 }
@@ -62,7 +62,7 @@ function initCollapsible() {
   const navLinks = document.getElementById('nav-links');
   navLinks.classList.add('no-transition');
 
-  document.querySelectorAll('#nav-links > ul > li').forEach(li => {
+  document.querySelectorAll('#nav-groups > .nav-group > ul > li').forEach(li => {
     const sub  = li.querySelector(':scope > .nav-sub');
     const link = li.querySelector(':scope > a[data-section]');
     if (!sub || !link) return;
@@ -122,6 +122,10 @@ function showSection(id, pushState = true, scrollTarget = null) {
     target.classList.add('active');
     currentSection = id;
     if (pushState) history.pushState({ section: id }, '', '#' + id);
+    loadSectionImages(target);
+    buildBreadcrumb(id);
+    buildTOC(target);
+    buildPagerNav(target, id);
   }
 
   document.getElementById('nav').classList.remove('open');
@@ -134,6 +138,155 @@ function showSection(id, pushState = true, scrollTarget = null) {
   } else {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
+}
+
+/* ─── Performance: only fetch screenshots for the section being viewed ───── */
+
+function loadSectionImages(section) {
+  section.querySelectorAll('img[data-src]').forEach(img => {
+    img.src = img.dataset.src;
+    img.removeAttribute('data-src');
+  });
+}
+
+/* ─── Breadcrumb ─────────────────────────────────────────────────────────── */
+
+function buildBreadcrumb(id) {
+  const bar = document.getElementById('breadcrumb');
+  if (!bar) return;
+  const link = document.querySelector(`#nav-groups a[data-section="${id}"]:not([data-scroll])`);
+  const group = link?.closest('.nav-group')?.querySelector('.nav-group-title')?.textContent;
+  const title = link?.textContent?.trim() || document.getElementById(id)?.querySelector('h1')?.textContent || '';
+  bar.innerHTML = '';
+  const home = document.createElement('a');
+  home.href = '#about';
+  home.dataset.section = 'about';
+  home.textContent = 'Docs';
+  bar.appendChild(home);
+  if (group) {
+    bar.appendChild(document.createTextNode(' / '));
+    const g = document.createElement('span');
+    g.className = 'crumb-group';
+    g.textContent = group;
+    bar.appendChild(g);
+  }
+  if (title) {
+    bar.appendChild(document.createTextNode(' / '));
+    const t = document.createElement('span');
+    t.className = 'crumb-current';
+    t.textContent = title;
+    bar.appendChild(t);
+  }
+  home.addEventListener('click', e => {
+    e.preventDefault();
+    setActiveLink(document.querySelector('a[data-section="about"]:not([data-scroll])'));
+    showSection('about', true);
+  });
+}
+
+/* ─── "On this page" TOC ─────────────────────────────────────────────────── */
+
+function buildTOC(section) {
+  const inner = document.getElementById('toc-inner');
+  if (!inner) return;
+  const headings = section.querySelectorAll('h2[id], h3[id]');
+  inner.innerHTML = '';
+  if (!headings.length) {
+    document.getElementById('toc')?.classList.add('empty');
+    return;
+  }
+  document.getElementById('toc')?.classList.remove('empty');
+
+  const label = document.createElement('div');
+  label.className = 'toc-label';
+  label.textContent = 'On this page';
+  inner.appendChild(label);
+
+  const list = document.createElement('ul');
+  headings.forEach(h => {
+    const li = document.createElement('li');
+    li.className = h.tagName === 'H3' ? 'toc-sub' : '';
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.textContent = h.textContent.replace(/^\s+/, '');
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    li.appendChild(a);
+    list.appendChild(li);
+  });
+  inner.appendChild(list);
+  initTocScrollSpy(headings, inner);
+}
+
+let tocObserver = null;
+
+function initTocScrollSpy(headings, inner) {
+  if (tocObserver) tocObserver.disconnect();
+  if (!headings.length) return;
+
+  tocObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      const link = inner.querySelector(`a[href="#${entry.target.id}"]`);
+      if (!link) return;
+      if (entry.isIntersecting) {
+        inner.querySelectorAll('a.active').forEach(a => a.classList.remove('active'));
+        link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-80px 0px -70% 0px', threshold: 0 });
+
+  headings.forEach(h => tocObserver.observe(h));
+}
+
+/* ─── Prev / Next footer navigation ──────────────────────────────────────── */
+
+function getSectionOrder() {
+  return Array.from(document.querySelectorAll('#nav-groups a[data-section]:not([data-scroll])'))
+    .map(a => a.dataset.section);
+}
+
+function buildPagerNav(section, id) {
+  section.querySelector('.pager-nav')?.remove();
+
+  const order = getSectionOrder();
+  const idx = order.indexOf(id);
+  if (idx === -1) return;
+
+  const prevId = order[idx - 1];
+  const nextId = order[idx + 1];
+  if (!prevId && !nextId) return;
+
+  const nav = document.createElement('div');
+  nav.className = 'pager-nav';
+
+  const makeLink = (targetId, dir) => {
+    const link = document.querySelector(`#nav-groups a[data-section="${targetId}"]:not([data-scroll])`);
+    const title = link?.textContent?.trim() || '';
+    const a = document.createElement('a');
+    a.href = '#' + targetId;
+    a.dataset.section = targetId;
+    a.className = 'pager-link pager-' + dir;
+    a.innerHTML = dir === 'prev'
+      ? `<span class="pager-dir">&larr; Previous</span><span class="pager-title">${title}</span>`
+      : `<span class="pager-dir">Next &rarr;</span><span class="pager-title">${title}</span>`;
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      setActiveLink(document.querySelector(`a[data-section="${targetId}"]:not([data-scroll])`));
+      setGroupOpen(targetId, true);
+      showSection(targetId, true);
+    });
+    return a;
+  };
+
+  if (prevId) nav.appendChild(makeLink(prevId, 'prev'));
+  else nav.appendChild(document.createElement('span'));
+  if (nextId) nav.appendChild(makeLink(nextId, 'next'));
+
+  const backTop = section.querySelector('.back-top');
+  if (backTop) backTop.after(nav);
+  else section.appendChild(nav);
 }
 
 function initNav() {
@@ -223,6 +376,7 @@ function runSearch(query) {
   document.querySelectorAll('section').forEach(section => {
     const hits = markTextNodes(section, regex);
     section.classList.toggle('has-match', hits > 0);
+    if (hits > 0) loadSectionImages(section);
     total += hits;
   });
 

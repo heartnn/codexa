@@ -1,0 +1,36 @@
+name: Deploy Codeberg Pages
+
+# Codeberg Pages has no repo-settings toggle like GitHub Pages — it serves whatever's at
+# the root of a branch named `pages` automatically, at https://thj.codeberg.page/codexa/.
+# docs/ lives under main, so this copies it to the root of an orphan `pages` branch and
+# force-pushes on every change, instead of maintaining a second copy by hand.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: https://github.com/actions/checkout@v4
+
+      - name: Publish docs/ to pages branch
+        run: |
+          set -e
+          mkdir -p /tmp/pages-out
+          cp -r docs/. /tmp/pages-out/
+
+          git config user.name "codexa-bot"
+          git config user.email "actions@noreply.codeberg.org"
+          git checkout --orphan pages-deploy
+          git rm -rf . > /dev/null
+          cp -r /tmp/pages-out/. .
+          git add -A
+          git commit -m "Deploy docs from ${{ github.sha }}"
+          git push --force "https://thj:${{ secrets.RELEASE_TOKEN }}@codeberg.org/thj/codexa.git" pages-deploy:refs/heads/pages
