@@ -61,15 +61,18 @@ let _flushing = false;
  * Push every pending offline position to the server + KOReader sync.
  * Idempotent and safe: skips (and clears) entries the server is already at/ahead
  * of, and uses the server's high-water-mark endpoints so it never regresses a
- * position advanced on another device. Returns the count of entries synced.
+ * position advanced on another device. Returns { count, bookIds } — bookIds lists
+ * which books actually got a position pushed (as opposed to silently dropped
+ * because the server was already at/ahead), so callers can toast per-book.
  */
 export async function flushProgressOutbox() {
-  if (_flushing) return 0;
+  if (_flushing) return { count: 0, bookIds: [] };
   const map = readOutbox();
   const ids = Object.keys(map);
-  if (!ids.length) return 0;
+  if (!ids.length) return { count: 0, bookIds: [] };
   _flushing = true;
   let synced = 0;
+  const syncedBookIds = [];
   try {
     for (const id of ids) {
       const e = map[id];
@@ -114,6 +117,7 @@ export async function flushProgressOutbox() {
 
         delete map[id];
         synced++;
+        syncedBookIds.push(e.bookId);
         log('[progress-outbox] flushed bookId', e.bookId, 'pct', Math.round(e.pct * 100) + '%');
       } catch (err) {
         // Still offline / server unreachable for this entry — keep it for next flush.
@@ -124,5 +128,5 @@ export async function flushProgressOutbox() {
     writeOutbox(map);
     _flushing = false;
   }
-  return synced;
+  return { count: synced, bookIds: syncedBookIds };
 }

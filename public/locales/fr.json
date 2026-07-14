@@ -605,6 +605,7 @@
   "reader.kosync_confirm_pull": "Récupérer la position de lecture depuis KOReader ?",
   "reader.kosync_confirm_push": "Envoyer la position actuelle à KOReader ?",
   "reader.kosync_push_done": "Position envoyée ({pct}%).",
+  "reader.kosync_auto_pull_done": "Position restaurée ({pct}%).",
   "reader.kosync_no_progress": "Aucune position KOReader trouvée.",
   "reader.kosync_same_position": "Déjà à la même position.",
   "reader.kosync_fetch_error": "Impossible de récupérer la position de lecture.",

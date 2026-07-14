@@ -101,7 +101,7 @@ syncOfflineClass();
 // (library.js fires it only after the API is confirmed reachable); 'online' is a
 // backup for LAN/desktop. Idempotent — safe to call repeatedly.
 function flushOfflineProgress() {
-  flushProgressOutbox().then(n => { if (n) log('[app] synced', n, 'offline progress entr' + (n === 1 ? 'y' : 'ies')); }).catch(() => {});
+  flushProgressOutbox().then(({ count }) => { if (count) log('[app] synced', count, 'offline progress entr' + (count === 1 ? 'y' : 'ies')); }).catch(() => {});
 }
 window.addEventListener('online', flushOfflineProgress);
 document.addEventListener('app:network-restored', flushOfflineProgress);

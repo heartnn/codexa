@@ -4923,6 +4923,7 @@ async function networkRestoreSync() {
     }
     currentPct = remotePct;
     lastSyncedCfi = currentCfi;
+    toast.success(t('reader.kosync_auto_pull_done', { pct: Math.round(remotePct * 100) }));
   } catch (e) { warn('[kosync] networkRestoreSync failed:', e.message); }
 }
 window.__codexaNetworkRestore = () => triggerNetworkRestore('native');
@@ -4939,7 +4940,11 @@ function triggerNetworkRestore(reason) {
   if (now - _lastNetRestore < 3000) return; // coalesce near-simultaneous triggers
   _lastNetRestore = now;
   log('[kosync] networkRestore trigger:', reason);
-  flushProgressOutbox().catch(() => {});
+  flushProgressOutbox().then(({ bookIds }) => {
+    if (currentBook && bookIds.includes(currentBook.id)) {
+      toast.success(t('reader.kosync_push_done', { pct: Math.round(currentPct * 100) }));
+    }
+  }).catch(() => {});
   networkRestoreSync().catch(() => {});
 }
 

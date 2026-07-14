@@ -605,6 +605,7 @@
   "reader.kosync_confirm_pull": "Prevzem položaja branja iz KOReaderja?",
   "reader.kosync_confirm_push": "Posredovanje trenutnega položaja v KOReader?",
   "reader.kosync_push_done": "Položaj posredovan ({pct}%).",
+  "reader.kosync_auto_pull_done": "Položaj obnovljen ({pct}%).",
   "reader.kosync_no_progress": "V KOReaderju ni shranjenega položaja.",
   "reader.kosync_same_position": "Že ste na isti poziciji.",
   "reader.kosync_fetch_error": "Napaka pri pridobivanju pozicije.",
