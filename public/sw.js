@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260714001';
+const CACHE_VERSION = 'br-v20260717002';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -25,7 +25,7 @@ const APP_SHELL = [
   '/js/i18n.js',
   '/js/opds.js',
   '/js/bookorbit.js',
-  '/js/reader_v4.js',
+  '/js/reader.js',
   '/js/vendor/jszip.min.js',
   '/locales/en.json',
   '/locales/de.json',
@@ -198,16 +198,19 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Cache user fonts: network-first so updates apply, cache fallback for offline
+  // Cache user fonts: network-first so updates apply, cache fallback for offline. Stored in
+  // BOOKS_CACHE (like covers, above) rather than CACHE_VERSION — that cache is wiped on every
+  // app-update activate(), which would silently drop offline font availability until the user
+  // was online again; BOOKS_CACHE is deliberately preserved across updates (see activate below).
   if (url.pathname.startsWith('/user-fonts/') && url.hostname === self.location.hostname) {
     e.respondWith(
       fetch(e.request).then(response => {
         if (response.ok) {
           const clone = response.clone();
-          caches.open(CACHE_VERSION).then(c => c.put(e.request, clone));
+          caches.open(BOOKS_CACHE).then(c => c.put(e.request, clone));
         }
         return response;
-      }).catch(() => caches.match(e.request).then(r => r || Response.error()))
+      }).catch(() => caches.open(BOOKS_CACHE).then(c => c.match(e.request)).then(r => r || Response.error()))
     );
     return;
   }
@@ -219,19 +222,19 @@ self.addEventListener('fetch', (e) => {
 
   // API calls: let the browser handle natively. On Chrome 83 Android WebView,
   // routing through e.respondWith(fetch(e.request)) causes the response to hang
-  // silently. Native bypass (same as br-v51) is safe here because reader_v4.js
+  // silently. Native bypass (same as br-v51) is safe here because reader.js
   // is also bypassed, so there is no large SW IPC transfer that would corrupt routing.
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
-  // reader_v4.js is pre-cached in APP_SHELL (without ?v=). Serve from SW cache so
+  // reader.js is pre-cached in APP_SHELL (without ?v=). Serve from SW cache so
   // offline reading works regardless of browser HTTP cache state. The MutationObserver
   // root-cause fix for Chrome 83 WebView is already in place client-side; the old
   // full bypass that relied solely on browser HTTP cache was too fragile for offline.
-  if (url.pathname === '/js/reader_v4.js' && url.hostname === self.location.hostname) {
+  if (url.pathname === '/js/reader.js' && url.hostname === self.location.hostname) {
     e.respondWith(
-      caches.match('/js/reader_v4.js').then(cached => cached || fetch(e.request))
+      caches.match('/js/reader.js').then(cached => cached || fetch(e.request))
     );
     return;
   }

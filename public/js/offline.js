@@ -162,7 +162,11 @@ export async function setDownloadStatus(bookId, status) {
 
 if (isOfflineSupported) {
   navigator.serviceWorker.addEventListener('message', e => {
-    const { type, bookId, message } = e.data || {};
+    const { type, bookId, message, loaded, total } = e.data || {};
+    if (type === 'DOWNLOAD_PROGRESS') {
+      _pending.get(bookId)?.onProgress?.(loaded, total);
+      return;
+    }
     log('[offline] SW message received:', type, bookId);
     if (type === 'CACHE_BOOK_DONE' || type === 'CACHE_BOOK_ERROR') {
       const handlers = _pending.get(bookId);
@@ -179,7 +183,7 @@ if (isOfflineSupported) {
  * Download a book's EPUB and cover to the device via the service worker.
  * Saves metadata to IndexedDB on completion.
  */
-export async function downloadBook(book, token) {
+export async function downloadBook(book, token, onProgress) {
   if (!isOfflineSupported) throw new Error('Offline not supported');
 
   // Use the active SW from the registration — more reliable than .controller,
@@ -205,7 +209,7 @@ export async function downloadBook(book, token) {
       reject(err);
     };
 
-    _pending.set(book.id, { resolve: onDone, reject: onError });
+    _pending.set(book.id, { resolve: onDone, reject: onError, onProgress });
 
     // 5-minute timeout guard
     timer = setTimeout(() => {

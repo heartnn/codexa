@@ -132,6 +132,22 @@ function sortBooks(list) {
   return sorted;
 }
 
+// Renders a showProgressToast() counter as MB instead of raw bytes for offline downloads.
+function formatMB(loaded, total) {
+  return `${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`;
+}
+
+// Update the in-place cover progress overlay for a book card while it's downloading. Queried
+// live (not cached) since applyFilter() can re-render the grid mid-download; a stale reference
+// would silently stop updating. Cheap no-op if the card isn't currently in the DOM (scrolled out).
+function updateCardDownloadProgress(bookId, loaded, total) {
+  const el = document.querySelector(`.book-card[data-id="${bookId}"] .book-download-progress`);
+  if (!el) return;
+  const pct = total ? Math.round((loaded / total) * 100) : 0;
+  el.querySelector('.book-download-progress-pct').textContent = pct + '%';
+  el.querySelector('.book-download-progress-bar').style.width = pct + '%';
+}
+
 // ── Render grid ───────────────────────────────────────────────────────────────
 const GRID_CHUNK = 48;
 let _gridList     = [];   // full sorted list from last renderGrid call
@@ -169,6 +185,7 @@ function _makeCard(book, globalIndex, isEink) {
       ${cover}
       ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
       ${book.series_number ? `<div class="book-series-badge">#${escHtml(book.series_number)}</div>` : ''}
+      ${isDownloading ? `<div class="book-download-progress"><span class="book-download-progress-pct">0%</span><div class="book-download-progress-track"><div class="book-download-progress-bar" style="width:0%"></div></div></div>` : ''}
       <a class="book-card-peek-btn" href="/reader.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
     </div>
     <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
@@ -252,7 +269,7 @@ function _makeCard(book, globalIndex, isEink) {
     downloadingIds.add(book.id);
     applyFilter();
     try {
-      await downloadBook(book, getToken());
+      await downloadBook(book, getToken(), (loaded, total) => updateCardDownloadProgress(book.id, loaded, total));
       downloadedIds.add(book.id);
       toast.success(t('library.toast_downloaded'));
       updateDownloadedCount(downloadedIds.size);
@@ -570,7 +587,7 @@ function openCardMenu(book, btn) {
     downloadingIds.add(book.id);
     applyFilter();
     try {
-      await downloadBook(book, getToken());
+      await downloadBook(book, getToken(), (loaded, total) => updateCardDownloadProgress(book.id, loaded, total));
       downloadedIds.add(book.id);
       toast.success(t('library.toast_downloaded'));
       updateDownloadedCount(downloadedIds.size);
@@ -969,8 +986,9 @@ export async function openInfoModal(book, startTab = '') {
     } else {
       downloadingIds.add(fullBook.id);
       applyFilter();
+      const progress = showProgressToast(t('library.downloading'), formatMB);
       try {
-        await downloadBook(fullBook, getToken());
+        await downloadBook(fullBook, getToken(), (loaded, total) => progress.update(loaded, total));
         downloadedIds.add(fullBook.id);
         toast.success(t('library.toast_downloaded'));
         updateDownloadedCount(downloadedIds.size);
@@ -978,6 +996,7 @@ export async function openInfoModal(book, startTab = '') {
         console.error('[offline] download failed:', err.message);
         toast.error(t('library.toast_download_err'));
       } finally {
+        progress.dismiss();
         downloadingIds.delete(fullBook.id);
         applyFilter();
         close();

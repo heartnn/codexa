@@ -83,7 +83,7 @@ function closeDrawer() {
 
 // ── Resume state (mirrors bookorbit.js's saveResumeState/restoreResumeState) ─
 // Lets closing a book found via OPDS come back to the same server/folder instead of the
-// default library view (reader_v4.js reads ?from=opds the same way it already reads
+// default library view (reader.js reads ?from=opds the same way it already reads
 // ?from=bookorbit).
 const RESUME_KEY = 'br_opds_resume';
 

@@ -76,7 +76,16 @@ export async function apiFetch(path, options = {}) {
   // 204 No Content
   if (res.status === 204) return null;
 
-  return res.json();
+  // A reverse proxy in front of the API (e.g. Cloudflare Firewall/WAF rules, IP Access Rules,
+  // "Managed Challenge") can answer with a 2xx HTTP status but an HTML interstitial body
+  // instead of real JSON — res.ok is true here, so without this guard res.json() would throw
+  // a raw SyntaxError that many callers across the app don't wrap in try/catch, instead of the
+  // same translated error shape every other failure already produces.
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(t('error.http_error', { status: res.status }));
+  }
 }
 
 export function requireAuth() {

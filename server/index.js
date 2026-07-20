@@ -47,7 +47,7 @@ initDb();
 app.set('trust proxy', 1);
 
 // Gzip every response (JS/CSS/HTML/JSON) — nothing was compressing these before, so every asset
-// (main.css, reader_v4.js, etc.) was going out over the wire at full size on every request.
+// (main.css, reader.js, etc.) was going out over the wire at full size on every request.
 // Placed before static/route handlers so it wraps all of them; a reverse proxy in front (see
 // README's "Self-Hosting Behind a Reverse Proxy") may also compress, which is harmless — this
 // just guarantees it happens even for users running Codexa directly with no proxy at all.

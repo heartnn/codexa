@@ -833,6 +833,16 @@ async function loadCustomFonts() {
       document.head.appendChild(hostStyle);
     }
     hostStyle.textContent = fontFaceCSS;
+    // Proactively fetch every custom font's bytes (not just whichever one is active), so the
+    // SW's network-first/cache-fallback handler for /user-fonts/ (public/sw.js) warms its cache
+    // for all of them. @font-face only triggers a fetch when text is actually painted with it —
+    // a font picked in Settings but never yet rendered on this device (or one whose cache got
+    // wiped by an app-update CACHE_VERSION bump) would otherwise stay uncached until the next
+    // time it's used online, and silently fall back to the default font offline in the meantime
+    // (a failed @font-face fetch just drops that font-face, no error surfaces).
+    if (navigator.onLine) {
+      files.forEach(f => { fetch(`/user-fonts/${encodeURIComponent(f)}`).catch(() => {}); });
+    }
   } catch (err) {
     warn('[reader] Custom fonts not loaded:', err.message);
   }
@@ -6795,10 +6805,15 @@ async function init() {
     loadingMsg.textContent = t('reader.loading_book');
     if (_legacyWebView) {
       // Legacy path (br-v51 pattern): network first → IDB only as offline fallback.
-      // IDB-first hangs on old WebViews; apiFetch is reliable.
+      // IDB-first hangs on old WebViews; apiFetch is reliable when it settles — but on a
+      // WiFi-associated-but-no-internet connection (radio "online" per navigator.onLine,
+      // actual internet flaky/gone — exactly the mid-read online→offline transition), a plain
+      // fetch() can hang indefinitely on this WebView instead of rejecting, so the IDB
+      // fallback below never runs and the reader is stuck on a blank loading screen. Race it
+      // against a timeout so a hang degrades into the same offline fallback a clean failure gets.
       log('[reader] metadata: network-first (legacy)');
       try {
-        currentBook = await apiFetch(`/books/${bookId}`);
+        currentBook = await withTimeout(apiFetch(`/books/${bookId}`), 10000);
         log('[reader] book metadata from network:', currentBook.title);
       } catch {
         const _meta = await getBookMeta(Number(bookId));
@@ -6826,9 +6841,12 @@ async function init() {
         log('[reader] fetching book metadata from network...');
         const _tok = getToken();
         try {
-          const _res = await fetch('/api/books/' + bookId, {
+          // Timeout-guarded: a stale-online connection (radio associated, no real internet)
+          // can leave fetch() pending indefinitely instead of rejecting, which would otherwise
+          // hang here forever instead of falling through to the IDB fallback below.
+          const _res = await withTimeout(fetch('/api/books/' + bookId, {
             headers: Object.assign({ Accept: 'application/json' }, _tok ? { Authorization: 'Bearer ' + _tok } : {}),
-          });
+          }), 10000);
           log('[reader] fetch status:', _res.status);
           if (!_res.ok) throw new Error('HTTP ' + _res.status);
           currentBook = await _res.json();
@@ -6867,13 +6885,17 @@ async function init() {
     loadingMsg.textContent = t('reader.loading_file');
     if (_legacyWebView) {
       // Legacy path (br-v51 pattern): network first → CacheStorage only as offline fallback.
+      // Both awaits are timeout-guarded — see the metadata fetch above for why: a stale-online
+      // connection can leave either the headers or the body stream hanging forever on this
+      // WebView instead of rejecting, which would otherwise skip the CacheStorage fallback
+      // entirely and leave the reader stuck on a blank loading screen.
       log('[reader] epub: network-first (legacy)');
       try {
-        const _legRes = await fetch(`/api/books/${bookId}/file`, {
+        const _legRes = await withTimeout(fetch(`/api/books/${bookId}/file`, {
           headers: { Authorization: `Bearer ${getToken()}` },
-        });
+        }), 12000);
         if (!_legRes.ok) throw new Error(`HTTP ${_legRes.status}`);
-        arrayBuffer = await _legRes.arrayBuffer();
+        arrayBuffer = await withTimeout(_legRes.arrayBuffer(), 30000);
         log('[reader] epub from network (legacy), bytes:', arrayBuffer.byteLength);
       } catch {
         arrayBuffer = await fetchOfflineBookFile(bookId);

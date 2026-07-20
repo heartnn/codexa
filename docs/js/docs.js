@@ -488,6 +488,57 @@ function initLightbox() {
   });
 }
 
+/* ─── Forge-aware links (Codeberg vs GitHub deployment) ──────────────────── */
+
+// docs/ is a single shared source, published unchanged to both Codeberg Pages
+// (via .forgejo/workflows/pages.yml) and GitHub Pages (built-in, served straight
+// from main). Rather than maintaining two copies, the handful of forge-specific
+// bits (repo link, docker image, clone URL, releases link, CI artifact label)
+// are marked with ids and filled in at runtime based on which host served the page.
+const FORGES = {
+  codeberg: {
+    label:       'Codeberg',
+    repoUrl:     'https://codeberg.org/thj/codexa',
+    cloneUrl:    'https://codeberg.org/thj/codexa.git',
+    releasesUrl: 'https://codeberg.org/thj/codexa/releases',
+    dockerImage: 'codeberg.org/thj/codexa:latest',
+    ciLabel:     'Forgejo Actions artifacts',
+  },
+  github: {
+    label:       'GitHub',
+    repoUrl:     'https://github.com/thehijacker/codexa',
+    cloneUrl:    'https://github.com/thehijacker/codexa.git',
+    releasesUrl: 'https://github.com/thehijacker/codexa/releases',
+    dockerImage: 'ghcr.io/thehijacker/codexa:latest',
+    ciLabel:     'GitHub Actions artifacts',
+  },
+};
+
+function detectForge() {
+  // Codeberg Pages serves at *.codeberg.page. Everything else — GitHub Pages,
+  // the Gitea mirror, a local file preview — falls back to the GitHub-facing config.
+  return /(^|\.)codeberg\.page$/.test(location.hostname) ? 'codeberg' : 'github';
+}
+
+function initForgeLinks() {
+  const forge = FORGES[detectForge()];
+
+  const repoLink = document.getElementById('dyn-repo-link');
+  if (repoLink) { repoLink.href = forge.repoUrl; repoLink.textContent = forge.label; }
+
+  const releasesLink = document.getElementById('dyn-releases-link');
+  if (releasesLink) { releasesLink.href = forge.releasesUrl; releasesLink.textContent = `${forge.label} Releases`; }
+
+  const dockerImage = document.getElementById('dyn-docker-image');
+  if (dockerImage) dockerImage.textContent = forge.dockerImage;
+
+  const cloneUrl = document.getElementById('dyn-clone-url');
+  if (cloneUrl) cloneUrl.textContent = forge.cloneUrl;
+
+  const ciLabel = document.getElementById('dyn-ci-label');
+  if (ciLabel) ciLabel.textContent = forge.ciLabel;
+}
+
 /* ─── Copy buttons ───────────────────────────────────────────────────────── */
 
 function initCopyButtons() {
@@ -507,6 +558,7 @@ function initCopyButtons() {
 
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(currentTheme);
+  initForgeLinks();
   document.getElementById('theme-btn')?.addEventListener('click', cycleTheme);
   initCollapsible(); // must run before initNav so nav-row wrappers exist
   initNav();

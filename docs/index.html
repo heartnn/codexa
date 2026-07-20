@@ -204,7 +204,7 @@
 </div>
 <div id="nav-footer">
 <span class="nav-footer-text">
-<a href="https://codeberg.org/thj/codexa" rel="noopener" target="_blank">Codeberg</a>
+<a href="https://codeberg.org/thj/codexa" id="dyn-repo-link" rel="noopener" target="_blank">Codeberg</a>
          · 
         AGPL-3.0
       </span>
@@ -414,7 +414,7 @@
 <button class="copy-btn">Copy</button>
 <pre><code>services:
   codexa:
-    image: codeberg.org/thj/codexa:latest
+    image: <span id="dyn-docker-image">codeberg.org/thj/codexa:latest</span>
     container_name: codexa
     restart: unless-stopped
     ports:
@@ -504,7 +504,7 @@ docker compose up -d</code></pre>
 <p>Requires <strong>Node.js ≥ 18</strong>.</p>
 <div class="code-block">
 <button class="copy-btn">Copy</button>
-<pre><code>git clone https://codeberg.org/thj/codexa.git
+<pre><code>git clone <span id="dyn-clone-url">https://codeberg.org/thj/codexa.git</span>
 cd codexa
 cp .env.example .env
 # Edit .env and set JWT_SECRET
@@ -592,7 +592,7 @@ npm start</code></pre>
       </p>
 <h3>Installation</h3>
 <ol class="steps">
-<li>Download the APK from the <a href="https://codeberg.org/thj/codexa/releases" rel="noopener" target="_blank">Codeberg Releases</a> page.</li>
+<li>Download the APK from the <a href="https://codeberg.org/thj/codexa/releases" id="dyn-releases-link" rel="noopener" target="_blank">Codeberg Releases</a> page.</li>
 <li>On your Android device, go to <strong>Settings → Security</strong> (or <em>Apps → Special app access</em>) and enable <strong>Install from unknown sources</strong> for your browser or file manager.</li>
 <li>Open the downloaded APK and tap <strong>Install</strong>.</li>
 <li>Launch Codexa. On first run you will see a URL input screen — enter your Codexa server address (e.g. <code>https://books.example.com</code>).</li>
@@ -637,7 +637,7 @@ npm start</code></pre>
       </p>
 <h3>Path A — Free Sideload (no Apple account fee)</h3>
 <ol class="steps">
-<li>Download the <code>.ipa</code> file from the <strong>Forgejo Actions artifacts</strong> (available 30 days after each build).</li>
+<li>Download the <code>.ipa</code> file from the <strong id="dyn-ci-label">Forgejo Actions artifacts</strong> (available 30 days after each build).</li>
 <li>Install <a href="https://sideloadly.io" rel="noopener" target="_blank">Sideloadly</a> on Windows or macOS. iTunes drivers are required on Windows.</li>
 <li>Connect your iPhone/iPad via USB, open Sideloadly, drag in the IPA, and click Start.</li>
 <li>On the device: go to <strong>Settings → General → VPN &amp; Device Management</strong> and trust the developer certificate.</li>

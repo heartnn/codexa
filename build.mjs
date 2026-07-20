@@ -56,13 +56,13 @@ await esbuild.build({
   logLevel: 'warning',
 });
 
-// Step 3: bundle reader_v4.js with all its flow/ imports into one self-contained ESM file.
+// Step 3: bundle reader.js with all its flow/ imports into one self-contained ESM file.
 // Reduces HTTP requests and avoids issues with many concurrent SW respondWith() calls
 // during module loading on old WebViews.
-console.log('[build] Bundling reader_v4.js ...');
+console.log('[build] Bundling reader.js ...');
 await esbuild.build({
-  entryPoints: [path.join(PUBLIC, 'js', 'reader_v4.js')],
-  outfile: path.join(DIST, 'js', 'reader_v4.js'),
+  entryPoints: [path.join(PUBLIC, 'js', 'reader.js')],
+  outfile: path.join(DIST, 'js', 'reader.js'),
   allowOverwrite: true,
   bundle: true,
   format: 'esm',

@@ -37,9 +37,11 @@ export const toast = {
 
 /**
  * Shows a persistent toast with a progress bar.
- * Returns an object with `update(current, total, label)` and `dismiss()`.
+ * `formatCount` optionally formats the current/total counter text (default "current / total"
+ * as-is — pass one to e.g. render byte counts as MB). Returns an object with `update(current,
+ * total)` and `dismiss()`.
  */
-export function showProgressToast(label) {
+export function showProgressToast(label, formatCount) {
   const container = ensureToastContainer();
   const el = document.createElement('div');
   el.className = 'toast toast-progress';
@@ -52,7 +54,8 @@ export function showProgressToast(label) {
     update(current, total) {
       const pct = total ? Math.round((current / total) * 100) : 0;
       el.querySelector('.toast-progress-bar').style.width = pct + '%';
-      el.querySelector('.toast-progress-counter').textContent = `${current} / ${total}`;
+      el.querySelector('.toast-progress-counter').textContent =
+        formatCount ? formatCount(current, total) : `${current} / ${total}`;
     },
     dismiss() {
       el.style.opacity = '0';

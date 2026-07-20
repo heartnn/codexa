@@ -2138,6 +2138,41 @@ html[data-lib-theme="eink"] .book-card-menu-btn:hover,
   pointer-events: none;
 }
 
+/* Download-in-progress overlay on book card cover — shown while downloadBook() streams the
+   EPUB via the service worker, driven by the SW's DOWNLOAD_PROGRESS messages (offline.js). */
+.book-download-progress {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 3;
+  pointer-events: none;
+}
+.book-download-progress-pct {
+  color: #fff;
+  font-size: .95rem;
+  font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .6);
+}
+.book-download-progress-track {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 14px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .25);
+  overflow: hidden;
+}
+.book-download-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--color-accent, #e94560);
+  transition: width .15s linear;
+}
+
 /* Series-number badge, bottom-left of the cover — a slightly-transparent black rounded rectangle
    with white text (like a Goodreads/store-badge style corner tag), not a pill/button. Opposite
    corner from the peek button so the two never collide. Mirrored by .opds-card-series-badge/

@@ -458,7 +458,7 @@ router.get('/bookorbit-cover/:boBookId', async (req, res) => {
 });
 
 // ── POST /api/books/:id/peek-cleanup — reader's close-signal for an ephemeral peek book ────────
-// Fired (best-effort, keepalive) from reader_v4.js's beforeunload handler. Safe to call
+// Fired (best-effort, keepalive) from reader.js's beforeunload handler. Safe to call
 // unconditionally: no-ops on a missing or non-ephemeral row, so stale client state can never
 // delete a real book. The actual guarantee against a forced close/crash is the background sweep
 // (server/index.js), not this route.

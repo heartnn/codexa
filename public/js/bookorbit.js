@@ -21,7 +21,7 @@ let currentTotal   = 0;
 let bookorbitUrl   = ''; // BookOrbit server base URL, for the detail modal's "View on BookOrbit" link
 // One-shot "resume where I was" state — saved right before navigating to the reader for a peek
 // (see renderPeekButton), restored by initBookorbit() when the reader closes back here via
-// /?panel=bookorbit&from=bookorbit (see reader_v4.js's returnToLibrary()/beforeunload).
+// /?panel=bookorbit&from=bookorbit (see reader.js's returnToLibrary()/beforeunload).
 const RESUME_KEY = 'br_bookorbit_resume';
 
 // Series/Authors are the only sublist sources BookOrbit actually paginates server-side
