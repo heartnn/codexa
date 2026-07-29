@@ -26,7 +26,8 @@ export const SUPPORTED_LANGS = {
   es: 'Español',
   fr: 'Français',
   it: 'Italiano',
-  pt: 'Português'
+  pt: 'Português',
+  'zh-CN': '简体中文'
 };
 
 let _strings = {};
