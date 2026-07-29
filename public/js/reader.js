@@ -4911,11 +4911,16 @@ async function syncOnOpen(localProgress) {
   const int = intResult.status === 'fulfilled' ? intResult.value : null;
   log('[kosync] remote:', ext, 'internal:', int);
 
-  // Pick the freshest remote source
+  // Pick the freshest remote source. A source is usable if it has a numeric percentage —
+  // that's all the percentage-based jump below actually needs; .progress (a KOReader
+  // xpointer string) is only an optional precision refinement, so a percentage-only
+  // response (progress:null, as returned by some KOSync-compatible servers) must not be
+  // discarded outright.
+  const hasPosition = r => r && typeof r.percentage === 'number';
   let best = null;
-  if (ext?.progress) best = ext;
-  if (int?.progress && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
-  if (!best?.progress) {
+  if (hasPosition(ext)) best = ext;
+  if (hasPosition(int) && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
+  if (!hasPosition(best)) {
     log('[kosync] no remote progress found');
     return null;
   }
@@ -4923,7 +4928,7 @@ async function syncOnOpen(localProgress) {
   // Cache the precise xpointer so we can push it back unchanged when on the same chapter.
   // This prevents overwriting KOReader's /body/DocFragment[N]/body/div/p[M]/text().K
   // with a coarser chapter-start xpointer.
-  if (best.progress.startsWith('/body/DocFragment[')) {
+  if (best.progress && best.progress.startsWith('/body/DocFragment[')) {
     lastKnownXPointer = best.progress;
   }
 
@@ -4986,10 +4991,11 @@ async function networkRestoreSync() {
     ]);
     const ext = extResult.status === 'fulfilled' ? extResult.value : null;
     const int = intResult.status === 'fulfilled' ? intResult.value : null;
+    const hasPosition = r => r && typeof r.percentage === 'number';
     let best = null;
-    if (ext?.progress) best = ext;
-    if (int?.progress && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
-    if (!best?.progress) { log('[kosync] networkRestoreSync: no remote progress found'); return; }
+    if (hasPosition(ext)) best = ext;
+    if (hasPosition(int) && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
+    if (!hasPosition(best)) { log('[kosync] networkRestoreSync: no remote progress found'); return; }
 
     const remotePct = best.percentage || 0;
     if (remotePct > bestKnownRemotePct) bestKnownRemotePct = remotePct;
@@ -5003,7 +5009,7 @@ async function networkRestoreSync() {
     }
 
     log('[kosync] networkRestoreSync: auto-pulling remote position', Math.round(remotePct * 100) + '%');
-    if (best.progress.startsWith('/body/DocFragment[')) lastKnownXPointer = best.progress;
+    if (best.progress && best.progress.startsWith('/body/DocFragment[')) lastKnownXPointer = best.progress;
     if (_cxReader) {
       await _cxReader.goToPct(remotePct);
       _cxReader.seekToPercent(remotePct);
@@ -6543,23 +6549,41 @@ document.getElementById('kosync-zone-bl')?.addEventListener('click', async () =>
   if (!await kosyncConfirm('pull')) return;
 
   const docKey = externalDocKey();
-  const [extResult, intResult] = await Promise.allSettled([
+  const [extResult, intResult, ownResult] = await Promise.allSettled([
     apiFetch(`/kosync/remote/${encodeURIComponent(docKey)}`),
     apiFetch(`/kosync/internal/${encodeURIComponent(docKey)}`),
+    // Codexa's own cross-device progress (independent of KOSync, always kept up to date
+    // by saveProgress on every device) — this session may have loaded this book without
+    // ever refetching it (e.g. resumed from a WebView paused/backgrounded state rather
+    // than a fresh navigation), so a manual pull needs to check it too, not just KOSync.
+    apiFetch(`/progress/${encodeURIComponent(currentBook.file_hash)}`),
   ]);
 
-  if (extResult.status === 'rejected' && intResult.status === 'rejected') {
+  if (extResult.status === 'rejected' && intResult.status === 'rejected' && ownResult.status === 'rejected') {
     toast.error(t('reader.kosync_fetch_error'));
     return;
   }
 
   const ext = extResult.status === 'fulfilled' ? extResult.value : null;
   const int = intResult.status === 'fulfilled' ? intResult.value : null;
-  let best = null;
-  if (ext?.progress) best = ext;
-  if (int?.progress && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
+  const ownRaw = ownResult.status === 'fulfilled' ? ownResult.value : null;
+  // Reshaped to the same { percentage, progress, timestamp, device } shape as ext/int so
+  // it can be compared alongside them; it has no KOReader xpointer, only a plain percentage.
+  const own = (ownRaw && typeof ownRaw.percentage === 'number')
+    ? { percentage: ownRaw.percentage, progress: null, timestamp: ownRaw.updated_at || 0, device: ownRaw.device || 'web' }
+    : null;
 
-  if (!best?.progress) { toast.info(t('reader.kosync_no_progress')); return; }
+  // Pick the freshest usable source. A source is usable if it has a numeric percentage —
+  // .progress (KOReader xpointer) is only an optional precision refinement, never required
+  // to jump (see the percentage-only navigation below). Checked ext → int → own so own only
+  // wins ties against ext/int if strictly newer, matching the existing int-vs-ext tie-break.
+  const hasPosition = r => r && typeof r.percentage === 'number';
+  let best = null;
+  if (hasPosition(ext)) best = ext;
+  if (hasPosition(int) && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
+  if (hasPosition(own) && (!best || (own.timestamp || 0) > (best.timestamp || 0))) best = own;
+
+  if (!hasPosition(best)) { toast.info(t('reader.kosync_no_progress')); return; }
 
   if (Math.abs((best.percentage || 0) - currentPct) <= 0.01) {
     toast.info(t('reader.kosync_same_position'));
