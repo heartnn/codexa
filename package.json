@@ -17,7 +17,7 @@
     "build": "node build.mjs"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^11.10.0",
     "compression": "^1.7.4",
