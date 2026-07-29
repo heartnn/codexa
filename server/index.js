@@ -7,6 +7,7 @@ const compression = require('compression');
 const { initDb, DATA_DIR } = require('./db');
 
 const authRoutes     = require('./routes/auth');
+const oidcRoutes     = require('./routes/oidc');
 const settingsRoutes = require('./routes/settings');
 const booksRoutes    = require('./routes/books');
 const progressRoutes = require('./routes/progress');
@@ -130,6 +131,7 @@ app.use('/user-fonts', express.static(path.join(DATA_DIR, 'fonts')));
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/auth',     authRoutes);
+app.use('/api/auth/oidc', oidcRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/books',    booksRoutes);
 app.use('/api/shelves',  shelvesRoutes);

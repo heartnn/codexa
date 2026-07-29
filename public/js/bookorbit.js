@@ -4,7 +4,7 @@
 // renderer) rather than reusing library.js's book-card component, which isn't
 // parameterized for a different data source / action set.
 import { apiFetch } from './api.js';
-import { toast, setButtonLoading, initSortMenuFor, resyncSortMenu } from './ui.js';
+import { toast, setButtonLoading, initSortMenuFor, resyncSortMenu, showBlockingOverlay } from './ui.js';
 import { t } from './i18n.js';
 import { reloadLibrary, openInfoModal, sanitizeHtml } from './library.js';
 import { reloadShelves } from './sidebar.js';
@@ -415,6 +415,18 @@ function renderPeekButton(coverWrapEl, book) {
       e.stopPropagation();
       btn.disabled = true;
       btn.classList.add('bookorbit-btn-busy');
+      // The server does the actual download from BookOrbit here — this request only resolves
+      // once that finishes, so there's no client-visible byte progress to show (unlike the
+      // reader's own file fetch, which streams and reports %). A blocking overlay at least makes
+      // it clear something is happening and blocks other taps while it's in flight; the slow-
+      // download message kicks in if it's still running after a few seconds.
+      let cancelled = false;
+      const overlay = showBlockingOverlay(t('bookorbit.peek_downloading'), () => {
+        cancelled = true;
+        btn.disabled = false;
+        btn.classList.remove('bookorbit-btn-busy');
+      });
+      const slowTimer = setTimeout(() => overlay.setMessage(t('common.download_slow_hint')), 8000);
       try {
         const result = await apiFetch(`/bookorbit/books/${book.boBookId}/peek`, {
           method: 'POST',
@@ -425,12 +437,24 @@ function renderPeekButton(coverWrapEl, book) {
             language: book.language,
           }),
         });
+        clearTimeout(slowTimer);
+        if (cancelled) {
+          // User already backed out — don't yank them into the reader. The server did finish the
+          // download though, so clean up the ephemeral row now instead of waiting for the TTL sweep.
+          apiFetch(`/books/${result.id}/peek-cleanup`, { method: 'POST' }).catch(() => {});
+          return;
+        }
+        overlay.dismiss();
         saveResumeState(); // let the reader send us back here on close
         window.location.href = `/reader.html?id=${result.id}&peek=1&from=bookorbit`;
       } catch (err) {
-        toast.error(err.message);
-        btn.disabled = false;
-        btn.classList.remove('bookorbit-btn-busy');
+        clearTimeout(slowTimer);
+        if (!cancelled) {
+          overlay.dismiss();
+          toast.error(err.message);
+          btn.disabled = false;
+          btn.classList.remove('bookorbit-btn-busy');
+        }
       }
     });
   }

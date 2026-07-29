@@ -234,12 +234,40 @@ function initDb() {
     // imported) — safe to delete after this unix timestamp or on explicit close signal.
     // See server/utils/peekCleanup.js.
     [`ALTER TABLE books           ADD COLUMN peek_expires_at        INTEGER DEFAULT NULL`,     'books.peek_expires_at'],
+    // OIDC-linked accounts (Google/Apple/self-hosted IdP login). NULL provider/sub = local
+    // password account. password_hash stays NOT NULL for these too (a random unusable hash is
+    // generated at account-creation time) to avoid a table-rebuild migration.
+    [`ALTER TABLE users           ADD COLUMN oidc_provider          TEXT    DEFAULT NULL`,     'users.oidc_provider'],
+    [`ALTER TABLE users           ADD COLUMN oidc_sub                TEXT    DEFAULT NULL`,     'users.oidc_sub'],
+    [`ALTER TABLE users           ADD COLUMN email                   TEXT    DEFAULT NULL`,     'users.email'],
   ];
   for (const [sql, label] of migrations) {
     try {
       database.exec(sql);
       console.log(`[db] Migration: added ${label}`);
     } catch { /* column already exists — ignore */ }
+  }
+
+  // Composite uniqueness for OIDC identities can't be expressed via ADD COLUMN.
+  try {
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc
+        ON users(oidc_provider, oidc_sub) WHERE oidc_provider IS NOT NULL
+    `);
+  } catch (e) {
+    console.warn('[db] idx_users_oidc creation:', e.message);
+  }
+
+  // Email is optional (used as a second login identifier and to auto-link an OIDC identity
+  // to an existing local account — see server/routes/oidc.js). Always stored lowercased by
+  // the app, so a plain unique index is enough (no need for a functional LOWER() index).
+  try {
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+        ON users(email) WHERE email IS NOT NULL AND email != ''
+    `);
+  } catch (e) {
+    console.warn('[db] idx_users_email creation:', e.message);
   }
 
   // Backfill last_opened_at from last progress save, else added_at (counts as "opened when added").

@@ -54,6 +54,8 @@
 <ul class="nav-sub">
 <li><a data-scroll="login-register" data-section="first-login" href="#login-register">Registering</a></li>
 <li><a data-scroll="login-security" data-section="first-login" href="#login-security">Security</a></li>
+<li><a data-scroll="login-email" data-section="first-login" href="#login-email">Setting Your Email</a></li>
+<li><a data-scroll="login-oidc" data-section="first-login" href="#login-oidc">OIDC / Single Sign-On</a></li>
 </ul>
 </li></ul></div><div class="nav-group"><div class="nav-group-title">Library</div><ul><li>
 <a data-section="upload" href="#upload">Uploading Books</a>
@@ -490,6 +492,12 @@ volumes:
 <td><code>false</code></td>
 <td>Set to <code>true</code> to enable verbose browser console logging. When enabled, all internal messages (<code>[reader]</code>, <code>[api]</code>, <code>[kosync]</code>, <code>[CXReader]</code>, etc.) appear in DevTools. Off by default — only warnings and errors are shown.</td>
 </tr>
+<tr>
+<td><code>OIDC_PROVIDERS</code> and <code>OIDC_&lt;KEY&gt;_*</code></td>
+<td>No</td>
+<td><em>(none)</em></td>
+<td>Enable OIDC login (Google, Apple, self-hosted) as an alternative to local registration. See <a data-scroll="login-oidc" data-section="first-login" href="#login-oidc">OIDC / Single Sign-On</a> for the full variable reference and setup examples.</td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -741,9 +749,16 @@ data/<br/>
 <ol class="steps">
 <li>Navigate to your Codexa server URL in a browser.</li>
 <li>Click <strong>Register</strong> on the login page.</li>
-<li>Enter a username (3–32 characters, letters, numbers, and underscores only) and a password (minimum 8 characters).</li>
+<li>Enter a username (3–32 characters, letters, numbers, and underscores only), an optional email address, and a password (minimum 8 characters).</li>
 <li>Click <strong>Register</strong>. You will be logged in automatically.</li>
 </ol>
+<p>
+        The email address is optional and can also be added later from
+        <a data-scroll="settings-general" data-section="settings" href="#settings-general">Settings → General → Email</a>.
+        Setting it lets you sign in with either your username or your email, and lets a matching
+        <a data-scroll="login-oidc" data-section="first-login" href="#login-oidc">OIDC login</a>
+        link to this account automatically instead of creating a separate one.
+      </p>
 <div class="callout">
 <strong>⭐ First user is the admin</strong>
         The very first account registered on a fresh Codexa instance is automatically the
@@ -752,8 +767,9 @@ data/<br/>
       </div>
 <h2>Logging In</h2>
 <p>
-        Enter your username and password on the login page. Sessions last <strong>1 year</strong>.
-        If your session expires, you will be redirected to the login page.
+        Enter your username <em>or</em> email address, and your password, on the login page.
+        Sessions last <strong>1 year</strong>. If your session expires, you will be redirected to
+        the login page.
       </p>
 <figure>
 <img alt="Login" data-src="screenshots/login.png" decoding="async" loading="lazy"/>
@@ -770,11 +786,205 @@ data/<br/>
         Go to <strong>Settings → General → Change password</strong>. Enter your new password twice
         (minimum 8 characters) and click Save.
       </p>
+<h2 id="login-email">Setting or Changing Your Email</h2>
+<p>
+        Go to <strong>Settings → General → Email</strong>, enter an address, and click
+        <strong>Save email</strong>. This is entirely optional, but has two effects once set:
+      </p>
+<ul>
+<li>You can log in with either your username or your email address.</li>
+<li>A matching, <em>verified</em> email from an OIDC provider (Google, Apple, self-hosted) will link to this account automatically on first sign-in, instead of creating a new one — see <a data-scroll="login-oidc" data-section="first-login" href="#login-oidc">OIDC / Single Sign-On</a>.</li>
+</ul>
+<p>
+        Each email address can only be used by one account. Clearing the field (saving it empty)
+        removes it — you can then only log in with your username again, and it will no longer
+        match any OIDC identity.
+      </p>
 <h2>Disabling Registration</h2>
 <p>
         After creating all the accounts you need, an admin can disable new-user registration to
         prevent unauthorised sign-ups. See <a data-section="settings" href="#settings">Settings → Admin</a>.
       </p>
+<h2 id="login-oidc">OIDC / Single Sign-On</h2>
+<p>
+        As an alternative to local username/password registration, Codexa can log people in via
+        any standard OIDC provider — Google, Apple, or a self-hosted identity provider you run
+        yourself. It's disabled by default; setting <code>OIDC_PROVIDERS</code> turns it on, and
+        one "Sign in with…" button appears on the login page per configured provider.
+      </p>
+<h3>How Account Matching Works</h3>
+<p>A successful OIDC login is matched against existing Codexa accounts in two steps:</p>
+<ol class="steps">
+<li><strong>By provider + subject ID</strong> — if this exact identity has logged in before, it reuses that account.</li>
+<li><strong>By verified email</strong> — otherwise, if the provider vouches for the email (sends <code>email_verified: true</code>) and it matches the email set on an existing, not-yet-linked local account (Settings → Email, or set at registration), that account is linked instead of creating a new one. This is what lets someone who already registered locally start using OIDC without ending up with a second, empty account — the email just needs to match on both sides.</li>
+</ol>
+<p>
+        If neither matches <em>and</em> new registrations are currently allowed (see
+        <a data-scroll="settings-admin" data-section="settings" href="#settings-admin">Settings → Admin → Registration</a>),
+        a new account is auto-created. If registration is disabled, an unrecognised identity is
+        rejected instead of silently creating an account — you'll see a message on the login page
+        explaining that an admin needs to either re-enable registration or link an existing
+        account's email.
+      </p>
+<div class="callout">
+<strong>🔒 Email linking is verified-only</strong>
+        An email match only ever links to an account that isn't already linked to a different
+        identity, and only when the provider explicitly marks the email as verified. A provider
+        that doesn't assert <code>email_verified</code> (or sends no email at all) always falls
+        through to creating a new account rather than linking by an unverified email — otherwise a
+        misconfigured or malicious provider could take over an unrelated account just by claiming
+        its email address.
+      </div>
+<div class="callout">
+<strong>⚠️ Not included: Facebook</strong>
+        Facebook doesn't implement standard OIDC (no discovery document, no <code>id_token</code>),
+        so it can't use this generic integration. Google, Apple, and any self-hosted provider
+        (Dex, Authelia, Keycloak, Authentik, …) are all real OIDC and work out of the box.
+      </div>
+<div class="callout">
+<strong>ℹ️ OIDC accounts and KOReader Sync</strong>
+        An account created via OIDC has no local password, so it can't be used to log in to
+        <a data-scroll="settings-kosync" data-section="settings" href="#settings-kosync">KOReader Sync</a>
+        (which authenticates with username/password). Go to Settings → General → Change password
+        first if you need that account to also work with KOReader Sync.
+      </div>
+<h3>Example: Google</h3>
+<ol class="steps">
+<li>Create an OAuth 2.0 Client ID in the <a href="https://console.cloud.google.com/apis/credentials" rel="noopener" target="_blank">Google Cloud Console</a> (Web application), with an authorized redirect URI of <code>https://&lt;your-domain&gt;/api/auth/oidc/google/callback</code>.</li>
+<li>Set the environment variables:</li>
+</ol>
+<div class="code-block">
+<button class="copy-btn">Copy</button>
+<pre><code>OIDC_PROVIDERS=google
+OIDC_BASE_URL=https://&lt;your-domain&gt;
+OIDC_GOOGLE_ISSUER=https://accounts.google.com
+OIDC_GOOGLE_CLIENT_ID=&lt;your client id&gt;
+OIDC_GOOGLE_CLIENT_SECRET=&lt;your client secret&gt;
+OIDC_GOOGLE_NAME=Google</code></pre>
+</div>
+<p>
+        Apple (Sign in with Apple) works the same way with
+        <code>OIDC_APPLE_ISSUER=https://appleid.apple.com</code>, except Apple's "client secret" is
+        itself a JWT you generate and sign with an Apple private key, valid for at most 6 months —
+        you'll need to regenerate and redeploy it periodically.
+      </p>
+<h3>Example: Self-Hosted Provider with Predefined Users (Dex)</h3>
+<p>
+        If you'd rather not open the door to a third-party account at all, you can run your own
+        minimal OIDC provider with a fixed list of users you define yourself.
+        <a href="https://dexidp.io/" rel="noopener" target="_blank">Dex</a> is a good fit for this —
+        a single small container, no database, users declared directly in its config file.
+      </p>
+<p><code>dex-config.yaml</code>:</p>
+<div class="code-block">
+<button class="copy-btn">Copy</button>
+<pre><code>issuer: https://auth.example.com/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+staticClients:
+  - id: codexa
+    name: Codexa
+    secret: &lt;a-random-client-secret&gt;
+    redirectURIs:
+      - https://books.example.com/api/auth/oidc/dex/callback
+enablePasswordDB: true
+staticPasswords:
+  - email: "alice@domain.com"
+    # Generate with: htpasswd -bnBC 10 "" '&lt;password&gt;' | tr -d ':\n'
+    hash: "&lt;bcrypt hash&gt;"
+    username: "alice"
+    userID: "1"
+  - email: "bob@doma.com"
+    hash: "&lt;bcrypt hash&gt;"
+    username: "bob"
+    userID: "2"</code></pre>
+</div>
+<p>Add Dex as a second service in your <code>docker-compose.yaml</code>:</p>
+<div class="code-block">
+<button class="copy-btn">Copy</button>
+<pre><code>services:
+  codexa:
+    image: ghcr.io/thehijacker/codexa:latest
+    # ...existing config...
+    environment:
+      JWT_SECRET: "..."
+      OIDC_PROVIDERS: "dex"
+      OIDC_BASE_URL: "https://books.example.com"
+      OIDC_DEX_ISSUER: "https://auth.example.com/dex"
+      OIDC_DEX_CLIENT_ID: "codexa"
+      OIDC_DEX_CLIENT_SECRET: "&lt;the same random client secret as above&gt;"
+      OIDC_DEX_NAME: "Home SSO"
+
+  dex:
+    image: dexidp/dex:latest
+    container_name: dex
+    restart: unless-stopped
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex-config.yaml:/etc/dex/config.yaml
+    command: ["dex", "serve", "/etc/dex/config.yaml"]</code></pre>
+</div>
+<p>
+        Put both <code>books.example.com</code> and <code>auth.example.com</code> behind your
+        reverse proxy (see
+        <a data-scroll="inst-proxy" data-section="installation" href="#inst-proxy">Reverse Proxy</a>)
+        with HTTPS — OIDC providers generally require HTTPS redirect URIs. Only the
+        usernames/passwords you add to <code>staticPasswords</code> will ever be able to log in to
+        Codexa this way.
+      </p>
+<h3>Linking an Existing Local Account</h3>
+<p>
+        Already have a local account and want to switch it over to OIDC without losing your books
+        and progress? Go to <strong>Settings → Email</strong> and set the same email address
+        that's configured for you on the OIDC provider (e.g. the same value as Dex's
+        <code>staticPasswords[].email</code>), then sign in with that provider. Since the email
+        matches an existing, unlinked account, Codexa links to it instead of creating a new one.
+      </p>
+<div class="callout">
+<strong>💡 Already created a duplicate account by accident?</strong>
+        If you signed in via OIDC before setting a matching email and ended up with a second,
+        empty account: set the matching email on your <em>original</em> account (Settings →
+        Email), delete the duplicate account (Settings → Admin → User Management), then sign in
+        via OIDC again — this time it will link to the original account.
+      </div>
+<h3>OIDC Environment Variables</h3>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>Variable</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OIDC_PROVIDERS</code></td>
+<td>No</td>
+<td>Comma-separated list of provider keys to enable, e.g. <code>google,dex</code>. Leave unset to disable OIDC entirely — no buttons appear and nothing else in this section applies.</td>
+</tr>
+<tr>
+<td><code>OIDC_BASE_URL</code></td>
+<td>Only if <code>OIDC_PROVIDERS</code> is set</td>
+<td>Public base URL Codexa is reachable at, used to build each provider's callback URL.</td>
+</tr>
+<tr>
+<td><code>OIDC_&lt;KEY&gt;_ISSUER</code></td>
+<td>Only for each key in <code>OIDC_PROVIDERS</code></td>
+<td>The provider's OIDC issuer URL (its discovery document lives at <code>&lt;issuer&gt;/.well-known/openid-configuration</code>).</td>
+</tr>
+<tr>
+<td><code>OIDC_&lt;KEY&gt;_CLIENT_ID</code> / <code>_CLIENT_SECRET</code></td>
+<td>Only for each key in <code>OIDC_PROVIDERS</code></td>
+<td>Credentials for the OAuth client you registered with that provider.</td>
+</tr>
+<tr>
+<td><code>OIDC_&lt;KEY&gt;_NAME</code></td>
+<td>No</td>
+<td>Display label for the provider's button on the login page. Defaults to the key itself.</td>
+</tr>
+</tbody>
+</table>
+</div>
 <a class="back-top" href="#about">↑ Top</a>
 </section>
 <!-- ═══════════════════════════════════════════════════════ Settings ══ -->
@@ -824,6 +1034,11 @@ data/<br/>
 <strong>Auto-open last book:</strong> when enabled, Codexa automatically opens the
           most recently accessed book when you visit the library. Stored in your browser's
           local storage.
+        </li>
+<li>
+<strong>Email:</strong> optional. Lets you log in with your email as well as your
+          username, and lets a matching verified OIDC login link to this account automatically.
+          See <a data-scroll="login-email" data-section="first-login" href="#login-email">Setting Your Email</a>.
         </li>
 <li>
 <strong>Change password:</strong> enter a new password (minimum 8 characters) and
@@ -916,7 +1131,10 @@ data/<br/>
 <p>
         Toggle <strong>Allow new registrations</strong> to enable or disable the registration
         link on the login page. Disable this after setting up all accounts to prevent
-        unauthorised sign-ups.
+        unauthorised sign-ups. This also governs
+        <a data-scroll="login-oidc" data-section="first-login" href="#login-oidc">OIDC login</a>:
+        with registration disabled, an OIDC identity that doesn't already match an existing
+        account (by prior login or verified email) is rejected instead of auto-creating a new one.
       </p>
 <h3>User Management</h3>
 <p>

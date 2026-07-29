@@ -95,6 +95,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **Font management** — upload and delete custom fonts available to all users
 - **Dictionary management** — upload StarDict ZIP archives, delete dictionaries
 - **Registration control** — enable or disable new-user sign-up
+- **OIDC login** — optional single sign-on via Google, Apple, or a self-hosted provider (Dex, Authelia, Keycloak, ...), alongside local accounts — see [OIDC Login](#oidc-login-google-apple-self-hosted) below
 
 ### Internationalisation
 - **7 languages** — English, Slovenian, German, Spanish, French, Italian, Portuguese
@@ -142,6 +143,130 @@ All configuration is via environment variables:
 | `DATA_DIR` | no | `./data` | Path to persistent data (books, covers, fonts, DB) |
 | `CORS_ORIGIN` | no | _(same-origin)_ | Allowed CORS origin, e.g. `https://books.example.com` |
 | `DEBUG` | no | `false` | Set to `true` to enable verbose browser console logging (all `[reader]`, `[api]`, `[kosync]`, etc. messages). Off by default — only warnings and errors are shown. |
+| `OIDC_PROVIDERS` | no | _(none)_ | Comma-separated list of OIDC provider keys to enable. See [OIDC Login](#oidc-login-google-apple-self-hosted). |
+| `OIDC_BASE_URL` | only if `OIDC_PROVIDERS` set | — | Public base URL Codexa is reachable at, used to build the OIDC callback URL |
+| `OIDC_<KEY>_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_NAME` | only for each key in `OIDC_PROVIDERS` | — | Per-provider OIDC credentials and display name |
+
+---
+
+## OIDC Login (Google, Apple, self-hosted)
+
+Codexa supports logging in via any standard OIDC provider as an alternative to local
+username/password registration — Google, Apple, or a self-hosted identity provider you
+run yourself. It's disabled by default; setting `OIDC_PROVIDERS` turns it on.
+
+The first successful login from a given identity is matched against existing accounts in
+two steps:
+
+1. **By provider + subject ID** — if this exact identity has logged in before, it reuses
+   that account.
+2. **By verified email** — otherwise, if the provider vouches for the email (sends
+   `email_verified: true`) and it matches the email on an existing, not-yet-linked local
+   account (set via Settings → Email, or at registration), that account is linked instead
+   of creating a new one. This is what lets someone who already registered locally start
+   using OIDC without ending up with a second, empty account — the emails on both sides
+   (Codexa's Settings and your OIDC provider's user config) just need to match.
+
+If neither matches, a new account is **auto-created**. There is no separate admin approval
+step inside Codexa — access control lives at whichever identity provider you point Codexa
+at. That's exactly what makes a self-hosted provider with a fixed user list (below) work as
+a way to "predefine" who can log in.
+
+> **Note:** an email match only ever links to an account that isn't already linked to some
+> other identity — it won't reassign an account that's already tied to a different provider.
+> A provider that doesn't assert `email_verified` (or doesn't send an email at all) always
+> falls through to creating a new account, never links by an unverified email — otherwise a
+> malicious or misconfigured provider could take over an unrelated local account just by
+> claiming its email address.
+
+> **Note:** Facebook isn't included — it doesn't implement standard OIDC (no discovery
+> document, no `id_token`), so it can't use this generic integration.
+
+> **Note:** An account created via OIDC has no local password, so it can't be used to log
+> in to [KOReader Sync](#koreader-sync-setup) (which authenticates with username/password).
+> Set one via Settings → Change Password first if you need that account to also work with
+> KOReader Sync.
+
+### Example: Google
+
+1. Create an OAuth 2.0 Client ID in the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (Web application), with an authorized redirect URI of `https://<your-domain>/api/auth/oidc/google/callback`.
+2. Set the environment variables:
+   ```
+   OIDC_PROVIDERS=google
+   OIDC_BASE_URL=https://<your-domain>
+   OIDC_GOOGLE_ISSUER=https://accounts.google.com
+   OIDC_GOOGLE_CLIENT_ID=<your client id>
+   OIDC_GOOGLE_CLIENT_SECRET=<your client secret>
+   OIDC_GOOGLE_NAME=Google
+   ```
+
+Apple (Sign in with Apple) works the same way with `OIDC_APPLE_ISSUER=https://appleid.apple.com`,
+except Apple's "client secret" is itself a JWT you generate and sign with an Apple private
+key, valid for at most 6 months — you'll need to regenerate and redeploy it periodically.
+
+### Example: self-hosted provider with predefined users (Dex)
+
+If you'd rather not open the door to a third-party account at all, you can run your own
+minimal OIDC provider with a fixed list of users you define yourself. [Dex](https://dexidp.io/)
+is a good fit for this — a single small container, no database, users declared directly in
+its config file.
+
+`dex-config.yaml`:
+```yaml
+issuer: https://auth.example.com/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+staticClients:
+  - id: codexa
+    name: Codexa
+    secret: <a-random-client-secret>
+    redirectURIs:
+      - https://books.example.com/api/auth/oidc/dex/callback
+enablePasswordDB: true
+staticPasswords:
+  - email: "alice@domain.com"
+    # Generate with: htpasswd -bnBC 10 "" '<password>' | tr -d ':\n'
+    hash: "<bcrypt hash>"
+    username: "alice"
+    userID: "1"
+  - email: "bob@doma.com"
+    hash: "<bcrypt hash>"
+    username: "bob"
+    userID: "2"
+```
+
+Add Dex as a second service in your `docker-compose.yaml`:
+```yaml
+services:
+  codexa:
+    image: ghcr.io/thehijacker/codexa:latest
+    # ...existing config...
+    environment:
+      JWT_SECRET: "..."
+      OIDC_PROVIDERS: "dex"
+      OIDC_BASE_URL: "https://books.example.com"
+      OIDC_DEX_ISSUER: "https://auth.example.com/dex"
+      OIDC_DEX_CLIENT_ID: "codexa"
+      OIDC_DEX_CLIENT_SECRET: "<the same random client secret as above>"
+      OIDC_DEX_NAME: "Home SSO"
+
+  dex:
+    image: dexidp/dex:latest
+    container_name: dex
+    restart: unless-stopped
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex-config.yaml:/etc/dex/config.yaml
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+```
+
+Put both `books.example.com` and `auth.example.com` behind your reverse proxy (see
+[Self-Hosting Behind a Reverse Proxy](#self-hosting-behind-a-reverse-proxy)) with HTTPS —
+OIDC providers generally require HTTPS redirect URIs. Only the usernames/passwords you add
+to `staticPasswords` will ever be able to log in to Codexa this way.
 
 ---
 

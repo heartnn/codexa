@@ -1,5 +1,5 @@
 ﻿import { apiFetch, requireAuth, getToken } from './api.js';
-import { toast, initSortMenuFor, resyncSortMenu } from './ui.js';
+import { toast, initSortMenuFor, resyncSortMenu, syncStatusBarAppearance } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta, removeBook } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
@@ -395,6 +395,12 @@ const RENDITION_BOTTOM_RESERVE = 40;
 const readerLayout   = document.querySelector('.reader-layout');
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingMsg     = document.getElementById('loading-msg');
+const loadingCancelBtn = document.getElementById('loading-cancel-btn');
+// Cancelling never calls AbortController.abort() on the in-flight fetch — passing a signal to
+// fetch() is known to hang indefinitely on some old WebView builds (see the NOTE in api.js).
+// Navigating away is a safe, native way to give up on it instead: the browser tears down any
+// pending request for this document as part of unloading it, no matter how old the WebView is.
+loadingCancelBtn?.addEventListener('click', () => { window.location.href = libraryReturnUrl; });
 const epubViewer     = document.getElementById('epub-viewer');
 const bookTitleEl    = document.getElementById('book-title');
 const chapterTitleEl = document.getElementById('chapter-title');
@@ -788,8 +794,111 @@ function fontStyleFromFilename(f) {
   return (l.includes('italic') || l.includes('oblique')) ? 'italic' : 'normal';
 }
 
+let _fontBlobUrls = [];
+
+// Fetch a custom font file's raw bytes, network first, falling back to the Service
+// Worker's persistent font cache (BOOKS_CACHE in sw.js) read directly via the Cache
+// Storage API. Reading the cache here — once, from the top-level page — instead of
+// relying on a plain fetch() being intercepted by the SW matters because CXReader
+// renders each chapter into a fresh sandboxed blob: iframe, and whether such an
+// iframe's own fetches are actually routed through the controlling Service Worker is
+// inconsistent across WebView versions/chapters (observed: works for the first couple
+// of chapters offline, then silently stops). Resolving bytes up front sidesteps that.
+async function fetchFontBytes(filename) {
+  try {
+    const res = await fetch(`/user-fonts/${encodeURIComponent(filename)}`);
+    if (res.ok) return await res.arrayBuffer();
+  } catch { /* offline or network error — fall through to cache */ }
+  try {
+    if ('caches' in window) {
+      const cache = await caches.open('codexa-books-v2');
+      const cached = await cache.match(`/user-fonts/${encodeURIComponent(filename)}`);
+      if (cached) return await cached.arrayBuffer();
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function _setFontFaceStyle(css) {
+  fontFaceCSS = css;
+  let hostStyle = document.getElementById('_custom-font-faces');
+  if (!hostStyle) {
+    hostStyle = document.createElement('style');
+    hostStyle.id = '_custom-font-faces';
+    document.head.appendChild(hostStyle);
+  }
+  hostStyle.textContent = fontFaceCSS;
+}
+
+// Builds fontFaceCSS immediately, referencing each font by its live network URL —
+// no bytes are fetched by JS here, so this resolves synchronously fast and the
+// browser applies the font itself as soon as it paints text with it (exactly how
+// this worked before offline support was added). Kept as the initial/online path
+// so opening a book online is never delayed by the (slower) blob upgrade below.
+function _buildLiveFontCss(families) {
+  const cssLines = [];
+  for (const [family, ffiles] of Object.entries(families)) {
+    ffiles.forEach(f => {
+      // No format() hint: it's inferred from the file extension, but renamed/repackaged
+      // fonts often have an extension that doesn't match their actual sfnt data, and a
+      // wrong format() makes browsers silently drop the whole @font-face (the font then
+      // never applies and falls back to Georgia). Omitting it lets the engine sniff the
+      // bytes. Absolute origin URL so it also resolves inside CXReader's blob: iframe,
+      // whose document origin can be opaque on Android WebView.
+      cssLines.push(`@font-face {
+  font-family: "${family}";
+  src: url("${location.origin}/user-fonts/${encodeURIComponent(f)}");
+  font-weight: ${fontWeightFromFilename(f)};
+  font-style: ${fontStyleFromFilename(f)};
+}`);
+    });
+    customFonts.push({ label: family, value: `"${family}", Georgia, serif` });
+  }
+  return cssLines.join('\n');
+}
+
+// Re-resolves every custom font's bytes (network first, cache fallback) into blob:
+// URLs and swaps fontFaceCSS to reference those instead of the live network path.
+// Runs in the background, AFTER the fast live-URL CSS above is already showing the
+// right font, so it never delays the initial paint. It exists because each chapter
+// is rendered into a fresh sandboxed blob: iframe, and whether such an iframe's own
+// fetch() for an @font-face src is actually routed through the controlling Service
+// Worker is inconsistent across WebView versions/chapters (observed: works for the
+// first couple of chapters offline, then silently reverts to the default font).
+// Resolving bytes once here and handing every chapter a local blob: URL sidesteps
+// that entirely, including for chapters rendered fully offline.
+async function _upgradeFontsToBlobs(families) {
+  const cssLines = [];
+  const newCustomFonts = [];
+  for (const [family, ffiles] of Object.entries(families)) {
+    const results = await Promise.all(ffiles.map(async f => ({ f, bytes: await fetchFontBytes(f) })));
+    let hasFace = false;
+    for (const { f, bytes } of results) {
+      if (!bytes) continue; // neither network nor cache had it — skip this face
+      hasFace = true;
+      const blobUrl = URL.createObjectURL(new Blob([bytes]));
+      _fontBlobUrls.push(blobUrl);
+      cssLines.push(`@font-face {
+  font-family: "${family}";
+  src: url("${blobUrl}");
+  font-weight: ${fontWeightFromFilename(f)};
+  font-style: ${fontStyleFromFilename(f)};
+}`);
+    }
+    if (hasFace) newCustomFonts.push({ label: family, value: `"${family}", Georgia, serif` });
+  }
+  if (!cssLines.length) return; // nothing resolved — keep the live-URL CSS as-is
+  customFonts = newCustomFonts;
+  customFonts.sort((a, b) => a.label.localeCompare(b.label));
+  _setFontFaceStyle(cssLines.join('\n'));
+  if (_cxReader) reapplyStyles();
+  populateFontSelect();
+}
+
 async function loadCustomFonts() {
   customFonts = [];
+  _fontBlobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch {} });
+  _fontBlobUrls = [];
   let files;
   try {
     files = await apiFetch('/fonts', { timeout: 8000 });
@@ -806,43 +915,9 @@ async function loadCustomFonts() {
       if (!families[fam]) families[fam] = [];
       families[fam].push(f);
     });
-    const cssLines = [];
-    Object.entries(families).forEach(([family, ffiles]) => {
-      ffiles.forEach(f => {
-        // No format() hint: it's inferred from the file extension, but renamed/repackaged
-        // fonts often have an extension that doesn't match their actual sfnt data, and a
-        // wrong format() makes browsers silently drop the whole @font-face (the font then
-        // never applies and falls back to Georgia). Omitting it lets the engine sniff the
-        // bytes. Absolute origin URL so it also resolves inside CXReader's blob: iframe,
-        // whose document origin can be opaque on Android WebView.
-        cssLines.push(`@font-face {
-  font-family: "${family}";
-  src: url("${location.origin}/user-fonts/${encodeURIComponent(f)}");
-  font-weight: ${fontWeightFromFilename(f)};
-  font-style: ${fontStyleFromFilename(f)};
-}`);
-      });
-      customFonts.push({ label: family, value: `"${family}", Georgia, serif` });
-    });
-    fontFaceCSS = cssLines.join('\n');
+    _setFontFaceStyle(_buildLiveFontCss(families));
     customFonts.sort((a, b) => a.label.localeCompare(b.label));
-    let hostStyle = document.getElementById('_custom-font-faces');
-    if (!hostStyle) {
-      hostStyle = document.createElement('style');
-      hostStyle.id = '_custom-font-faces';
-      document.head.appendChild(hostStyle);
-    }
-    hostStyle.textContent = fontFaceCSS;
-    // Proactively fetch every custom font's bytes (not just whichever one is active), so the
-    // SW's network-first/cache-fallback handler for /user-fonts/ (public/sw.js) warms its cache
-    // for all of them. @font-face only triggers a fetch when text is actually painted with it —
-    // a font picked in Settings but never yet rendered on this device (or one whose cache got
-    // wiped by an app-update CACHE_VERSION bump) would otherwise stay uncached until the next
-    // time it's used online, and silently fall back to the default font offline in the meantime
-    // (a failed @font-face fetch just drops that font-face, no error surfaces).
-    if (navigator.onLine) {
-      files.forEach(f => { fetch(`/user-fonts/${encodeURIComponent(f)}`).catch(() => {}); });
-    }
+    _upgradeFontsToBlobs(families).catch(() => {});
   } catch (err) {
     warn('[reader] Custom fonts not loaded:', err.message);
   }
@@ -1278,6 +1353,7 @@ document.addEventListener('visibilitychange', () => {
     // backgrounding — re-establish one here if it didn't, so reading after a wake isn't silently
     // untracked until the next checkpoint.
     if (currentBook && isReady && !statsSessionId) startStatsSession(currentBook.id);
+    if (navigator.onLine) flushSessionCheckpoints().catch(() => {});
   }
   if (document.visibilityState === 'hidden') {
     writeInterruptedSession();
@@ -1328,6 +1404,7 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--reader-header-text-muted',  text);
     if (safeAreaFill) safeAreaFill.style.background = bg;
     epubViewer.style.background = bg;
+    syncStatusBarAppearance(bg);
   } else {
     document.documentElement.removeAttribute('data-reader-eink');
     // Apply full reader-theme palette to all shell UI (panels, sidebars, inputs …)
@@ -1359,6 +1436,7 @@ function applyUiTheme() {
     // Safe-area fill: solid (opaque) page colour so the translucent header doesn't leak through
     if (safeAreaFill) safeAreaFill.style.background = theme.bg;
     epubViewer.style.background = theme.bg;
+    syncStatusBarAppearance(ui.bg);
   }
   applyPageShadow();
   // Tag body with current theme name so CSS can target per-theme overrides.
@@ -4976,6 +5054,11 @@ window.addEventListener('online', () => {
   if (!currentBook) return;
   syncOfflineBookmarks(currentBook.id).catch(() => {});
   syncOfflineAnnotations(currentBook.id).catch(() => {});
+  flushSessionCheckpoints().catch(() => {});
+  // A session-start or rotate attempted while offline leaves statsSessionId null with no
+  // retry of its own (unlike the checkpoints above) — re-establish one now so reading after
+  // reconnect isn't silently untracked until the next visibilitychange.
+  if (isReady && !statsSessionId) startStatsSession(currentBook.id);
   triggerNetworkRestore('online');
 });
 
@@ -5942,6 +6025,45 @@ window.addEventListener('resize', debounce(() => {
 }, 300));
 
 // ── Reading statistics ────────────────────────────────────────────────────────
+
+// Reading-session checkpoint outbox (offline resilience). A rotate/close checkpoint's
+// PATCH can fail simply because the device is offline at that exact moment — unlike
+// bookmarks/annotations/position, this data has no other local copy once statsSessionId
+// is cleared, so a failed checkpoint was previously lost forever, and BookOrbit's
+// uploadSessions() (server/services/bookorbitSync.js) would never see it since it only
+// reads reading_sessions rows that already have an end_ts. Queue it here instead and
+// retry on reconnect, mirroring the bookmarks/annotations queues below.
+const SESSION_Q_KEY = 'br_session_q';
+
+function enqueueSessionCheckpoint(id, body) {
+  try {
+    const q = JSON.parse(localStorage.getItem(SESSION_Q_KEY) || '[]');
+    q.push({ id, body });
+    localStorage.setItem(SESSION_Q_KEY, JSON.stringify(q));
+  } catch { /* ignore */ }
+}
+
+async function flushSessionCheckpoints() {
+  let q;
+  try { q = JSON.parse(localStorage.getItem(SESSION_Q_KEY) || '[]'); } catch { q = []; }
+  if (!q.length) return;
+  const remaining = [];
+  for (const item of q) {
+    try {
+      await apiFetch(`/stats/session/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item.body),
+      });
+      log('[stats] flushed queued session checkpoint id:', item.id);
+    } catch (e) {
+      warn('[stats] session checkpoint still undeliverable, keeping queued:', e.message);
+      remaining.push(item);
+    }
+  }
+  try { localStorage.setItem(SESSION_Q_KEY, JSON.stringify(remaining)); } catch { /* ignore */ }
+}
+
 async function startStatsSession(bookId) {
   try {
     const res = await apiFetch('/stats/session', {
@@ -5972,12 +6094,13 @@ function endStatsSessionBackground() {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+  const body = { end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct };
   fetch(`/api/stats/session/${id}`, {
     method: 'PATCH',
     headers,
-    body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct }),
+    body: JSON.stringify(body),
     keepalive: true,
-  }).catch(() => {});
+  }).catch(() => enqueueSessionCheckpoint(id, body));
 }
 
 async function endStatsSession() {
@@ -5989,14 +6112,16 @@ async function endStatsSession() {
   statsSessionId   = null;
   sessionPageCount = 0;
   sessionStartPct  = null;
+  const body = { end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct };
   try {
     await apiFetch(`/stats/session/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct }),
+      body: JSON.stringify(body),
     });
   } catch (e) {
-    warn('[stats] failed to end session:', e.message);
+    warn('[stats] failed to end session, queued for retry:', e.message);
+    enqueueSessionCheckpoint(id, body);
   }
 }
 
@@ -6880,6 +7005,14 @@ async function init() {
   // ── EPUB file ──────────────────────────────────────────────────────────────
   log('[reader] loading epub...');
   let arrayBuffer;
+  // On the legacy WebView path (and the rare modern-path case with no Content-Length) there's no
+  // byte-level progress to show at all, just a static message, for as long as the 12s connect +
+  // 30s body timeouts allow — exactly the "nothing happens for a while on a large book" complaint.
+  // Escalate to a "this may be a large file" hint after a few seconds so it's clear the download
+  // is still in flight rather than stuck; the Cancel button in the overlay covers the actual bail-out.
+  const _slowFileDlTimer = setTimeout(() => {
+    if (loadingMsg) loadingMsg.textContent = t('common.download_slow_hint');
+  }, 8000);
   try {
     _rafStop = true; // stop dots — show progress % for network downloads
     loadingMsg.textContent = t('reader.loading_file');
@@ -6945,7 +7078,9 @@ async function init() {
         log('[reader] epub from network, bytes:', arrayBuffer.byteLength);
       }
     }
+    clearTimeout(_slowFileDlTimer);
   } catch (err) {
+    clearTimeout(_slowFileDlTimer);
     warn('[reader] epub load failed:', err?.message);
     if (!arrayBuffer) {
       const msg = !navigator.onLine

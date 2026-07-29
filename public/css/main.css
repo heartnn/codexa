@@ -225,7 +225,10 @@ html[data-lib-theme="eink"] .stats-book-cover,
 html[data-lib-theme="eink"] .info-modal-cover,
 html[data-lib-theme="eink"] .cover-preview-img,
 html[data-lib-theme="eink"] .info-modal-kosync-result-cover,
-html[data-lib-theme="eink"] .imt-related-cover { filter: grayscale(100%); }
+html[data-lib-theme="eink"] .imt-related-cover {
+  -webkit-filter: grayscale(100%) invert(1) brightness(0.78) invert(1);
+  filter: grayscale(100%) invert(1) brightness(0.78) invert(1);
+}
 html[data-lib-theme="eink"] .opds-welcome .icon,
 .sidebar-layout[data-lib-theme="eink"] .opds-welcome .icon { filter: grayscale(100%); }
 html[data-lib-theme="eink"] .book-offline-badge,
@@ -805,6 +808,17 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 }
 .modal-close:hover { color: var(--color-text); }
 .modal-footer { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.5rem; }
+
+.blocking-overlay-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1rem;
+  max-width: 320px;
+}
+.blocking-overlay-box .spinner { width: 1.8rem; height: 1.8rem; border-width: 3px; }
+.blocking-overlay-msg { margin: 0; color: var(--color-text-muted); }
 
 /* ── Spinner ────────────────────────────────────────────────────────────────── */
 .spinner {
@@ -3329,7 +3343,10 @@ html[data-lib-theme="eink"] #edit-remove-btn,
 html[data-lib-theme="eink"] .opds-card-cover,
 .sidebar-layout[data-lib-theme="eink"] .opds-card-cover,
 html[data-lib-theme="eink"] .bookorbit-card-cover,
-.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-cover { filter: grayscale(100%); }
+.sidebar-layout[data-lib-theme="eink"] .bookorbit-card-cover {
+  -webkit-filter: grayscale(100%) invert(1) brightness(0.78) invert(1);
+  filter: grayscale(100%) invert(1) brightness(0.78) invert(1);
+}
 
 /* Book info: genre tags */
 html[data-lib-theme="eink"] .genre-pill,
@@ -3346,11 +3363,37 @@ html[data-lib-theme="eink"] .btn-read,
   color: #fff;
 }
 
-/* Book info / edit mode: native checkboxes */
+/* Book info / edit mode: native checkboxes.
+   accent-color only themes the OS-native widget and isn't supported on WebView
+   older than Chromium 93, so on old WebView the checkbox falls back to the
+   stock control whose checkmark is barely visible on e-ink. Draw a fully
+   custom box + checkmark instead (appearance:none + background-image), a
+   technique that predates accent-color and works on ancient WebView too. */
 html[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
 html[data-lib-theme="eink"] .book-card-checkbox,
 .sidebar-layout[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
-.sidebar-layout[data-lib-theme="eink"] .book-card-checkbox { accent-color: #111; }
+.sidebar-layout[data-lib-theme="eink"] .book-card-checkbox {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  border: 2px solid #111;
+  border-radius: 2px;
+  background-color: #fff;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 70% 70%;
+  vertical-align: middle;
+  cursor: pointer;
+}
+html[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"]:checked,
+html[data-lib-theme="eink"] .book-card-checkbox:checked,
+.sidebar-layout[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"]:checked,
+.sidebar-layout[data-lib-theme="eink"] .book-card-checkbox:checked {
+  background-color: #111;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M3 8.5l3.2 3.2L13 4.8'/%3E%3C/svg%3E");
+}
 
 /* No spinning animation on e-ink displays — matches .book-card's animation:none treatment
    (~line 640). A spinning ring is wasted motion on a slow-refresh screen and can look like a

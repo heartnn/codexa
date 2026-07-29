@@ -6,7 +6,7 @@
 import { apiFetch, requireAuth, clearToken } from './api.js';
 import { t, initIconLangPicker } from './i18n.js';
 import { showPanel, getCurrentPanel } from './router.js';
-import { confirmDialog } from './ui.js';
+import { confirmDialog, syncStatusBarAppearance } from './ui.js';
 
 const LIB_THEME_KEY = 'br_library_theme';
 const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
@@ -585,6 +585,7 @@ function applyLibraryTheme(theme) {
     body.setAttribute('data-lib-theme', resolved);
     html.setAttribute('data-lib-theme', resolved);
   }
+  syncStatusBarAppearance(getComputedStyle(html).getPropertyValue('--color-bg'));
 }
 
 // Generic dropdown styled exactly like the language picker (reuses .lang-menu-* CSS):

@@ -618,6 +618,34 @@ btnSaveReg?.addEventListener('click', async () => {
     setButtonLoading(btnSaveReg, false, t('settings.btn_save'));
   }
 });
+// ── Account email ─────────────────────────────────────────────────────────────
+const accountEmail = document.getElementById('account-email');
+const btnSaveEmail = document.getElementById('btn-save-email');
+
+async function loadAccountEmail() {
+  if (!accountEmail) return;
+  try {
+    const { user } = await apiFetch('/auth/me');
+    accountEmail.value = user.email || '';
+  } catch (_) { /* ignore — leave blank */ }
+}
+
+btnSaveEmail?.addEventListener('click', async () => {
+  setButtonLoading(btnSaveEmail, true, t('settings.btn_saving'));
+  try {
+    const { email } = await apiFetch('/auth/email', {
+      method: 'PUT',
+      body: JSON.stringify({ email: accountEmail.value.trim() }),
+    });
+    accountEmail.value = email;
+    toast.success(t('settings.email_save_success'));
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btnSaveEmail, false, t('settings.email_save_btn'));
+  }
+});
+
 // ── Change password ───────────────────────────────────────────────────────────
 const btnChangePw = document.getElementById('btn-change-pw');
 btnChangePw?.addEventListener('click', async () => {
@@ -794,6 +822,7 @@ btnCancelEdit.addEventListener('click', exitEditMode);
   loadOpdsServers();
   loadDictPrefs();
   loadAdminSection();
+  loadAccountEmail();
 
   document.addEventListener('langchange', () => {
     loadDictPrefs();
