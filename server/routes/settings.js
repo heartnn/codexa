@@ -43,7 +43,6 @@ router.get('/', (req, res) => {
     bookorbit_account_username: row.bookorbit_account_username || '',
     has_bookorbit_account_password: (row.bookorbit_account_password_enc || '') !== '',
     reader_prefs:            JSON.parse(row.reader_prefs || '{}'),
-    active_preset_id:        row.active_preset_id,
   });
 });
 
@@ -56,7 +55,7 @@ router.put('/', (req, res) => {
 
   const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled,
           bookorbit_sync_enabled, bookorbit_url, bookorbit_account_username, bookorbit_account_password,
-          reader_prefs, active_preset_id } = req.body;
+          reader_prefs } = req.body;
 
   // Only update fields that were explicitly provided
   const next = {
@@ -71,7 +70,6 @@ router.put('/', (req, res) => {
     bookorbit_account_username:     bookorbit_account_username !== undefined ? String(bookorbit_account_username) : row.bookorbit_account_username,
     bookorbit_account_password_enc: bookorbit_account_password !== undefined ? String(bookorbit_account_password) : row.bookorbit_account_password_enc,
     reader_prefs:            reader_prefs    !== undefined ? JSON.stringify(reader_prefs)    : row.reader_prefs,
-    active_preset_id:        active_preset_id !== undefined ? active_preset_id               : row.active_preset_id,
   };
 
   db.prepare(`
@@ -85,8 +83,7 @@ router.put('/', (req, res) => {
            bookorbit_url                  = ?,
            bookorbit_account_username     = ?,
            bookorbit_account_password_enc = ?,
-           reader_prefs            = ?,
-           active_preset_id        = ?
+           reader_prefs            = ?
      WHERE user_id = ?
   `).run(
     next.opds_servers,
@@ -99,7 +96,6 @@ router.put('/', (req, res) => {
     next.bookorbit_account_username,
     next.bookorbit_account_password_enc,
     next.reader_prefs,
-    next.active_preset_id,
     req.user.id
   );
 
@@ -155,11 +151,6 @@ router.delete('/presets/:id', (req, res) => {
   const db = getDb();
   const info = db.prepare('DELETE FROM reader_presets WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
   if (info.changes === 0) return res.status(404).json({ error: 'Preset not found' });
-
-  db.prepare(
-    'UPDATE user_settings SET active_preset_id = NULL WHERE user_id = ? AND active_preset_id = ?'
-  ).run(req.user.id, req.params.id);
-
   res.json({ success: true });
 });
 

@@ -294,12 +294,15 @@ let _cxViewerPaddingSet = false; // true after the first post-render inset measu
 let _cxTouchNavIframe = null; // iframe that currently has touch-nav handlers attached
 let currentBook  = null;
 let prefs        = loadPrefs();
-// Which reader_presets row (if any) is currently selected. This is a UI selection, not
-// a "still matches exactly" flag: it stays set through further edits (so Update/Rename/
-// Delete remain available) and only changes when the user applies a different preset,
-// saves a new one, or deletes the selected one. null = nothing selected ("Custom").
-// Set from the server on init, and by applyPreset()/saveCurrentAsPreset()/deletePreset().
-let activePresetId = null;
+// Which reader_presets row (if any) is currently selected. This is a UI selection, not a
+// "still matches exactly" flag: it stays set through further edits (so Update/Rename/Delete
+// remain available) and only changes when the user applies a different preset, saves a new
+// one, or deletes the selected one. null = nothing selected ("Custom").
+// Deliberately per-device (localStorage), NOT synced to the server: presets themselves are
+// shared across devices, but which one each device is currently using is not — e.g. an
+// e-ink device and a phone can each stay on their own preset instead of the last device to
+// switch overwriting every other device's choice.
+let activePresetId = loadActivePresetId();
 let currentCfi   = '';
 let currentPct        = 0;
 let lastKnownGoodPct  = 0;
@@ -500,30 +503,6 @@ function loadPrefs() {
   } catch { return { ...DEFAULT_PREFS, statusBar: { ...DEFAULT_STATUS_BAR } }; }
 }
 
-// Overlay a partial prefs object (as returned by the server) onto the live `prefs`,
-// keeping any key the server payload doesn't have at its current local value (rather
-// than resetting to DEFAULT_PREFS) — the server blob may predate a newer app version
-// that introduced additional keys. Dictionary fields are handled the same way this
-// already worked before presets existed. Mutates `prefs` in place.
-function mergeServerPrefs(sp) {
-  const { statusBar: sbIn, edgePadding: epIn, dictionaries, dictionaryOrder, dictionaryMeta, ...rest } = sp;
-  Object.assign(prefs, rest);
-  if (epIn) prefs.edgePadding = { ...prefs.edgePadding, ...epIn };
-  if (sbIn) {
-    prefs.statusBar = {
-      ...prefs.statusBar,
-      ...sbIn,
-      positions:       { ...prefs.statusBar.positions,       ...(sbIn.positions || {}) },
-      showIcons:       { ...prefs.statusBar.showIcons,       ...(sbIn.showIcons || {}) },
-      bookProgressBar: { ...prefs.statusBar.bookProgressBar, ...(sbIn.bookProgressBar || {}) },
-      chapProgressBar: { ...prefs.statusBar.chapProgressBar, ...(sbIn.chapProgressBar || {}) },
-    };
-  }
-  if (dictionaryOrder?.length) prefs.dictionaryOrder = dictionaryOrder;
-  if (dictionaries !== undefined) prefs.dictionaries = dictionaries;
-  if (dictionaryMeta) prefs.dictionaryMeta = dictionaryMeta;
-}
-
 // Load per-book overrides and apply them onto prefs.
 function loadBookPrefs(bookId) {
   if (!bookId) return;
@@ -586,12 +565,13 @@ function persistPrefs() {
   // The per-book layer is stored separately in br_book_prefs; on load, loadBookPrefs() re-applies
   // the overrides so global prefs naturally reflect the last used values for each book context.
   localStorage.setItem('br_reader_prefs', JSON.stringify(prefs));
+  localStorage.setItem('br_active_preset_id', JSON.stringify(activePresetId));
   // Also track per-book overrides when a book is open
   if (currentBook?.id) saveBookPrefs(currentBook.id);
   renderPresetsUi();
   apiFetch('/settings', {
     method: 'PUT',
-    body: JSON.stringify({ reader_prefs: prefs, active_preset_id: activePresetId }),
+    body: JSON.stringify({ reader_prefs: prefs }),
   }).catch(() => {});
 }
 
@@ -607,14 +587,31 @@ let presetsList = []; // [{id, name, prefs, updated_at}], cached in memory once 
 // and would let the user attempt — and fail — a save. This flag reflects the real thing.
 let _presetsReachable = false;
 
+function loadActivePresetId() {
+  try {
+    const raw = localStorage.getItem('br_active_preset_id');
+    return raw != null ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 async function loadPresetsList() {
   try {
     presetsList = await apiFetch('/settings/presets');
     _presetsReachable = true;
   } catch {
     _presetsReachable = false;
+    renderPresetsUi();
+    return presetsList;
   }
-  renderPresetsUi();
+  // This device remembers it was using a preset — refresh to the latest saved version (it
+  // may have been edited from another device since applying it here) so this device stays
+  // consistent with that preset rather than a possibly-stale local copy of its content.
+  if (activePresetId != null) {
+    if (presetsList.some(p => p.id === activePresetId)) applyPreset(activePresetId);
+    else { activePresetId = null; persistPrefs(); } // preset was deleted elsewhere
+  } else {
+    renderPresetsUi();
+  }
   return presetsList;
 }
 
@@ -723,6 +720,16 @@ function renderPresetsUi() {
 // (library.js) — this codebase doesn't use native prompt()/confirm() anywhere.
 function presetNamePrompt(title, defaultValue = '') {
   return new Promise(resolve => {
+    // Snapshot the safe-area vars before the input below is focused and opens the on-screen
+    // keyboard. On some mobile browsers, the keyboard show/hide cycle leaves a fresh
+    // env(safe-area-inset-*) re-probe reporting 0 for a while afterward (timing varies by
+    // device — a single delayed re-probe wasn't reliable), collapsing the status bar under
+    // the notch/camera cutout. Restoring these known-good values verbatim, instead of
+    // trusting a fresh measurement, sidesteps that unreliability entirely.
+    const root = document.documentElement;
+    const savedSat = root.style.getPropertyValue('--sat');
+    const savedSab = root.style.getPropertyValue('--sab');
+
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
@@ -739,7 +746,19 @@ function presetNamePrompt(title, defaultValue = '') {
     document.body.appendChild(backdrop);
     const input = backdrop.querySelector('#preset-name-input');
     input.value = defaultValue; // set as a property, not interpolated into the HTML string
-    const close = value => { backdrop.remove(); resolve(value); };
+    const close = value => {
+      backdrop.remove();
+      resolve(value);
+      const restore = () => {
+        if (savedSat) root.style.setProperty('--sat', savedSat);
+        if (savedSab) root.style.setProperty('--sab', savedSab);
+        reapplyStyles();
+      };
+      // Several passes at increasing delays — keyboard-dismiss timing varies a lot across
+      // devices/browsers, so no single delay is reliable (matches the multi-probe settle
+      // strategy reader.html's own safe-area bootstrap already uses for the same reason).
+      [50, 300, 700, 1200].forEach(ms => setTimeout(restore, ms));
+    };
     backdrop.querySelector('#preset-name-cancel').addEventListener('click', () => close(null));
     backdrop.querySelector('#preset-name-save').addEventListener('click', () => close(input.value.trim() || null));
     input.addEventListener('keydown', e => { if (e.key === 'Enter') close(input.value.trim() || null); });
@@ -7136,22 +7155,19 @@ document.addEventListener('fullscreenchange', async () => {
 async function init() {
   await _i18nReady;
 
-  // Pull the last-synced settings from the server so a device that's already been used
-  // (not just a brand-new one) also stays in sync — persistPrefs() always pushes every
-  // change; this is what pulls it back, which is what actually keeps devices consistent.
-  // Fire-and-forget on purpose: book metadata loading below has its own timeout/offline
-  // races and must not block on this. If it resolves after this book's per-book overrides
-  // were already applied (loadBookPrefs() further down), reapply them on top so a
-  // slow-arriving global update can never clobber a book-specific override.
-  apiFetch('/settings').then(s => {
-    const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
-    mergeServerPrefs(sp);
-    activePresetId = s.active_preset_id ?? null;
-    if (currentBook?.id) loadBookPrefs(currentBook.id);
-    applyUiTheme();
-    reapplyStyles();
-    syncSettingsUi();
-  }).catch(() => {});
+  // If localStorage was cleared (no saved prefs), restore dict selection/order from the
+  // server copy so word lookups use the user's configured dictionaries, not the language
+  // default. Deliberately narrow (dictionaries only, only on a genuinely empty device): the
+  // rest of `prefs` is per-device on purpose — see activePresetId above. A device that's
+  // already been used keeps its own settings/preset rather than inheriting another device's.
+  if (!localStorage.getItem('br_reader_prefs')) {
+    apiFetch('/settings').then(s => {
+      const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
+      if (sp.dictionaryOrder?.length) prefs.dictionaryOrder = sp.dictionaryOrder;
+      if (sp.dictionaries !== undefined) prefs.dictionaries = sp.dictionaries;
+      if (sp.dictionaryMeta) prefs.dictionaryMeta = sp.dictionaryMeta;
+    }).catch(() => {});
+  }
 
   log('[reader] UA:', navigator.userAgent.slice(0, 200));
   log('[reader] bookId:', bookId, 'online:', navigator.onLine);

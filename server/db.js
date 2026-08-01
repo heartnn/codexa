@@ -253,9 +253,6 @@ function initDb() {
     [`ALTER TABLE users           ADD COLUMN oidc_provider          TEXT    DEFAULT NULL`,     'users.oidc_provider'],
     [`ALTER TABLE users           ADD COLUMN oidc_sub                TEXT    DEFAULT NULL`,     'users.oidc_sub'],
     [`ALTER TABLE users           ADD COLUMN email                   TEXT    DEFAULT NULL`,     'users.email'],
-    // Which reader_presets row (if any) the live reader_prefs currently matches — informational,
-    // lets the client highlight the active preset / offer "Update" vs "Save as new".
-    [`ALTER TABLE user_settings   ADD COLUMN active_preset_id        INTEGER DEFAULT NULL`,     'user_settings.active_preset_id'],
   ];
   for (const [sql, label] of migrations) {
     try {

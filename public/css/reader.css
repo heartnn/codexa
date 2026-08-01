@@ -1511,6 +1511,16 @@ html.no-flexgap .spread-buttons.page-anim-grid > * + * { margin-left: 0; }
   color: #fff;
   border-color: #000;
 }
+[data-reader-eink] .preset-chip {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+[data-reader-eink] .preset-chip.active {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
 
 /* E-ink reader: settings dialog contrast fixes */
 [data-reader-eink] .btn-secondary {
