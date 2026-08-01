@@ -294,6 +294,12 @@ let _cxViewerPaddingSet = false; // true after the first post-render inset measu
 let _cxTouchNavIframe = null; // iframe that currently has touch-nav handlers attached
 let currentBook  = null;
 let prefs        = loadPrefs();
+// Which reader_presets row (if any) is currently selected. This is a UI selection, not
+// a "still matches exactly" flag: it stays set through further edits (so Update/Rename/
+// Delete remain available) and only changes when the user applies a different preset,
+// saves a new one, or deletes the selected one. null = nothing selected ("Custom").
+// Set from the server on init, and by applyPreset()/saveCurrentAsPreset()/deletePreset().
+let activePresetId = null;
 let currentCfi   = '';
 let currentPct        = 0;
 let lastKnownGoodPct  = 0;
@@ -450,41 +456,72 @@ const annotationAcceptBtn = document.getElementById('btn-annotation-accept');
 // Keys that are stored per-book (content appearance).  All others are global.
 const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','letterSpacing','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','dictionaryOrder','bionicReading','skipOpenProgressCheck','skipSaveOnClose'];
 
+// Deep-merge a saved prefs object onto DEFAULT_PREFS (missing keys/nested keys fall
+// back to defaults). Shared by loadPrefs() (source: localStorage) and the server pull
+// in init() (source: GET /api/settings) so the merge rules can't drift between the two.
+function mergePrefsWithDefaults(saved) {
+  const sb = saved.statusBar || {};
+  const legacyBtnPx = typeof saved.headerButtonSize === 'number' ? saved.headerButtonSize : null;
+  const btnBase = window.matchMedia('(max-width: 640px)').matches ? 44 : 36;
+  return {
+    ...DEFAULT_PREFS,
+    ...saved,
+    headerButtonScalePct: saved.headerButtonScalePct ?? (
+      legacyBtnPx != null && legacyBtnPx > 0
+        ? Math.min(225, Math.max(75, Math.round(legacyBtnPx / btnBase * 100)))
+        : DEFAULT_PREFS.headerButtonScalePct
+    ),
+    edgePadding: { ...DEFAULT_PREFS.edgePadding, ...(saved.edgePadding || {}) },
+    statusBar: {
+      ...DEFAULT_STATUS_BAR,
+      ...sb,
+      positions:       {
+        ...DEFAULT_STATUS_BAR.positions,
+        // On mobile with no saved br slot, show battery + connection by default.
+        ...(!('br' in (sb.positions || {})) && window.matchMedia('(max-width: 640px)').matches
+            ? { br: ['battery', 'online'] } : {}),
+        ...sb.positions,
+      },
+      showIcons:       { ...DEFAULT_STATUS_BAR.showIcons,       ...sb.showIcons },
+      bookProgressBar: { ...DEFAULT_STATUS_BAR.bookProgressBar, ...sb.bookProgressBar },
+      chapProgressBar: { ...DEFAULT_STATUS_BAR.chapProgressBar, ...sb.chapProgressBar },
+      clockFormat:     sb.clockFormat || DEFAULT_STATUS_BAR.clockFormat,
+    },
+  };
+}
+
 function loadPrefs() {
   try {
     const s = localStorage.getItem('br_reader_prefs');
     const saved = s ? JSON.parse(s) : {};
-    const sb = saved.statusBar || {};
-    const legacyBtnPx = typeof saved.headerButtonSize === 'number' ? saved.headerButtonSize : null;
-    const btnBase = window.matchMedia('(max-width: 640px)').matches ? 44 : 36;
-    const merged = {
-      ...DEFAULT_PREFS,
-      ...saved,
-      headerButtonScalePct: saved.headerButtonScalePct ?? (
-        legacyBtnPx != null && legacyBtnPx > 0
-          ? Math.min(225, Math.max(75, Math.round(legacyBtnPx / btnBase * 100)))
-          : DEFAULT_PREFS.headerButtonScalePct
-      ),
-      edgePadding: { ...DEFAULT_PREFS.edgePadding, ...(saved.edgePadding || {}) },
-      statusBar: {
-        ...DEFAULT_STATUS_BAR,
-        ...sb,
-        positions:       {
-          ...DEFAULT_STATUS_BAR.positions,
-          // On mobile with no saved br slot, show battery + connection by default.
-          ...(!('br' in (sb.positions || {})) && window.matchMedia('(max-width: 640px)').matches
-              ? { br: ['battery', 'online'] } : {}),
-          ...sb.positions,
-        },
-        showIcons:       { ...DEFAULT_STATUS_BAR.showIcons,       ...sb.showIcons },
-        bookProgressBar: { ...DEFAULT_STATUS_BAR.bookProgressBar, ...sb.bookProgressBar },
-        chapProgressBar: { ...DEFAULT_STATUS_BAR.chapProgressBar, ...sb.chapProgressBar },
-        clockFormat:     sb.clockFormat || DEFAULT_STATUS_BAR.clockFormat,
-      },
-    };
+    const merged = mergePrefsWithDefaults(saved);
     if (localStorage.getItem('br_library_theme') === 'eink') merged.eink = true;
     return merged;
   } catch { return { ...DEFAULT_PREFS, statusBar: { ...DEFAULT_STATUS_BAR } }; }
+}
+
+// Overlay a partial prefs object (as returned by the server) onto the live `prefs`,
+// keeping any key the server payload doesn't have at its current local value (rather
+// than resetting to DEFAULT_PREFS) — the server blob may predate a newer app version
+// that introduced additional keys. Dictionary fields are handled the same way this
+// already worked before presets existed. Mutates `prefs` in place.
+function mergeServerPrefs(sp) {
+  const { statusBar: sbIn, edgePadding: epIn, dictionaries, dictionaryOrder, dictionaryMeta, ...rest } = sp;
+  Object.assign(prefs, rest);
+  if (epIn) prefs.edgePadding = { ...prefs.edgePadding, ...epIn };
+  if (sbIn) {
+    prefs.statusBar = {
+      ...prefs.statusBar,
+      ...sbIn,
+      positions:       { ...prefs.statusBar.positions,       ...(sbIn.positions || {}) },
+      showIcons:       { ...prefs.statusBar.showIcons,       ...(sbIn.showIcons || {}) },
+      bookProgressBar: { ...prefs.statusBar.bookProgressBar, ...(sbIn.bookProgressBar || {}) },
+      chapProgressBar: { ...prefs.statusBar.chapProgressBar, ...(sbIn.chapProgressBar || {}) },
+    };
+  }
+  if (dictionaryOrder?.length) prefs.dictionaryOrder = dictionaryOrder;
+  if (dictionaries !== undefined) prefs.dictionaries = dictionaries;
+  if (dictionaryMeta) prefs.dictionaryMeta = dictionaryMeta;
 }
 
 // Load per-book overrides and apply them onto prefs.
@@ -551,10 +588,186 @@ function persistPrefs() {
   localStorage.setItem('br_reader_prefs', JSON.stringify(prefs));
   // Also track per-book overrides when a book is open
   if (currentBook?.id) saveBookPrefs(currentBook.id);
+  renderPresetsUi();
   apiFetch('/settings', {
     method: 'PUT',
-    body: JSON.stringify({ reader_prefs: prefs }),
+    body: JSON.stringify({ reader_prefs: prefs, active_preset_id: activePresetId }),
   }).catch(() => {});
+}
+
+// ── Reader-settings presets ────────────────────────────────────────────────────
+// Named snapshots of prefs (minus dictionary selection, which has its own global
+// sync + per-book-language-default logic), synced via the backend so the same list
+// is available on every device — see server/routes/settings.js.
+let presetsList = []; // [{id, name, prefs, updated_at}], cached in memory once fetched
+// True only after a presets API call has actually succeeded. Drives whether
+// Save/Update/Rename/Delete are offered — navigator.onLine/_isOnline is NOT enough here:
+// it only reflects whether a network interface is up, so "connected to WiFi but the
+// server is unreachable" (server down, wrong network, etc.) still reports online:true
+// and would let the user attempt — and fail — a save. This flag reflects the real thing.
+let _presetsReachable = false;
+
+async function loadPresetsList() {
+  try {
+    presetsList = await apiFetch('/settings/presets');
+    _presetsReachable = true;
+  } catch {
+    _presetsReachable = false;
+  }
+  renderPresetsUi();
+  return presetsList;
+}
+
+function currentPrefsForPreset() {
+  const { dictionaries, dictionaryOrder, dictionaryMeta, ...rest } = prefs;
+  return rest;
+}
+
+async function saveCurrentAsPreset(name) {
+  const preset = await apiFetch('/settings/presets', {
+    method: 'POST',
+    body: JSON.stringify({ name, prefs: currentPrefsForPreset() }),
+  });
+  presetsList.push(preset);
+  activePresetId = preset.id;
+  persistPrefs();
+  return preset;
+}
+
+async function updatePreset(id) {
+  const preset = await apiFetch(`/settings/presets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ prefs: currentPrefsForPreset() }),
+  });
+  const i = presetsList.findIndex(p => p.id === id);
+  if (i !== -1) presetsList[i] = preset;
+  renderPresetsUi();
+  return preset;
+}
+
+async function renamePreset(id, name) {
+  const preset = await apiFetch(`/settings/presets/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  });
+  const i = presetsList.findIndex(p => p.id === id);
+  if (i !== -1) presetsList[i] = preset;
+  renderPresetsUi();
+  return preset;
+}
+
+async function deletePreset(id) {
+  await apiFetch(`/settings/presets/${id}`, { method: 'DELETE' });
+  presetsList = presetsList.filter(p => p.id !== id);
+  if (activePresetId === id) {
+    activePresetId = null;
+    persistPrefs();
+  } else {
+    renderPresetsUi();
+  }
+}
+
+// Apply a saved preset's settings onto the live prefs. Deliberately leaves this book's
+// per-book overrides (br_book_prefs) untouched — "Reset for this book"
+// (#btn-reset-book-prefs, see clearBookPrefs()) is the existing, explicit way to clear
+// those if the user wants the preset to fully take over a book with its own overrides.
+function applyPreset(id) {
+  const preset = presetsList.find(p => p.id === id);
+  if (!preset) return;
+  const { dictionaries, dictionaryOrder, dictionaryMeta, ...rest } = preset.prefs;
+  Object.assign(prefs, rest);
+  activePresetId = id;
+  applyUiTheme();
+  reapplyStyles();
+  syncSettingsUi();
+  persistPrefs();
+}
+
+// Render the preset list + active/"Custom" state into the Theme tab (#presets-list,
+// #btn-preset-update/rename/delete, #preset-custom-label). No-op before the settings
+// panel exists in the DOM (it always does — reader.html is static markup — but this
+// is also called from async callbacks that may resolve unusually early or late).
+function renderPresetsUi() {
+  const listEl = document.getElementById('presets-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  presetsList.forEach(p => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'preset-chip' + (p.id === activePresetId ? ' active' : '');
+    btn.textContent = p.name;
+    btn.addEventListener('click', () => applyPreset(p.id));
+    listEl.appendChild(btn);
+  });
+  document.getElementById('preset-custom-label')?.classList.toggle('hidden', activePresetId != null);
+  const hasActive = activePresetId != null;
+  document.getElementById('btn-preset-update')?.classList.toggle('hidden', !hasActive);
+  document.getElementById('btn-preset-rename')?.classList.toggle('hidden', !hasActive);
+  document.getElementById('btn-preset-delete')?.classList.toggle('hidden', !hasActive);
+
+  // Save/Update/Rename/Delete all need a server round trip (Save needs the server-assigned
+  // id back; the others must not silently no-op) — disable them until we've actually
+  // confirmed the presets API is reachable, rather than let the user hit a failed-request
+  // toast. Applying a preset stays enabled: it's a local merge of already-fetched data,
+  // degrading the same way any other settings change already does.
+  const disabled = !_presetsReachable;
+  for (const id of ['btn-preset-save', 'btn-preset-update', 'btn-preset-rename', 'btn-preset-delete']) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.disabled = disabled;
+    btn.title = disabled ? t('reader.preset_offline_hint') : '';
+  }
+}
+
+// Small text-input modal, matching the style of the existing shelf-rename modal
+// (library.js) — this codebase doesn't use native prompt()/confirm() anywhere.
+function presetNamePrompt(title, defaultValue = '') {
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:340px">
+        <h2>${title}</h2>
+        <div class="form-group">
+          <input type="text" id="preset-name-input" maxlength="60" autofocus />
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="preset-name-cancel">${t('common.cancel')}</button>
+          <button class="btn btn-primary"   id="preset-name-save">${t('common.save')}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const input = backdrop.querySelector('#preset-name-input');
+    input.value = defaultValue; // set as a property, not interpolated into the HTML string
+    const close = value => { backdrop.remove(); resolve(value); };
+    backdrop.querySelector('#preset-name-cancel').addEventListener('click', () => close(null));
+    backdrop.querySelector('#preset-name-save').addEventListener('click', () => close(input.value.trim() || null));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') close(input.value.trim() || null); });
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(null); });
+    input.focus();
+    input.select();
+  });
+}
+
+// Small confirm modal, mirroring kosyncConfirm() below.
+function presetConfirm(msg) {
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:340px">
+        <p style="margin-bottom:1.5rem">${msg}</p>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="preset-confirm-cancel">${t('common.cancel')}</button>
+          <button class="btn btn-primary"   id="preset-confirm-ok">${t('common.confirm')}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const close = ok => { backdrop.remove(); resolve(ok); };
+    backdrop.querySelector('#preset-confirm-cancel').addEventListener('click', () => close(false));
+    backdrop.querySelector('#preset-confirm-ok').addEventListener('click',     () => close(true));
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(false); });
+  });
 }
 
 function readBionicReloadState() {
@@ -4281,6 +4494,53 @@ function initSettingsUi() {
     updateBookPrefsIndicator();
   });
 
+  // A write failing mid-session (server unreachable while the browser still thinks it's
+  // online — see _presetsReachable) means don't wait for the next online/offline event to
+  // disable further attempts; react to the failure itself.
+  const onPresetActionFailed = err => {
+    _presetsReachable = false;
+    renderPresetsUi();
+    toast.error(t('common.err_prefix') + err.message);
+  };
+  document.getElementById('btn-preset-save')?.addEventListener('click', async () => {
+    // Belt-and-suspenders: don't rely on the button's disabled attribute alone — some
+    // WebViews (see _legacyWebView elsewhere in this file) still fire click/touchend on a
+    // disabled button. This is the guard that actually matters.
+    if (!_presetsReachable) return;
+    const name = await presetNamePrompt(t('reader.preset_save_title'));
+    if (!name) return;
+    try {
+      await saveCurrentAsPreset(name);
+      toast.success(t('reader.preset_saved'));
+    } catch (err) { onPresetActionFailed(err); }
+  });
+  document.getElementById('btn-preset-update')?.addEventListener('click', async () => {
+    if (!_presetsReachable || activePresetId == null) return;
+    try {
+      await updatePreset(activePresetId);
+      toast.success(t('reader.preset_updated'));
+    } catch (err) { onPresetActionFailed(err); }
+  });
+  document.getElementById('btn-preset-rename')?.addEventListener('click', async () => {
+    if (!_presetsReachable || activePresetId == null) return;
+    const current = presetsList.find(p => p.id === activePresetId);
+    const name = await presetNamePrompt(t('reader.preset_rename_title'), current?.name || '');
+    if (!name) return;
+    try {
+      await renamePreset(activePresetId, name);
+    } catch (err) { onPresetActionFailed(err); }
+  });
+  document.getElementById('btn-preset-delete')?.addEventListener('click', async () => {
+    if (!_presetsReachable || activePresetId == null) return;
+    const current = presetsList.find(p => p.id === activePresetId);
+    if (!await presetConfirm(t('reader.preset_delete_confirm', { name: sbEsc(current?.name || '') }))) return;
+    try {
+      await deletePreset(activePresetId);
+      toast.success(t('reader.preset_deleted'));
+    } catch (err) { onPresetActionFailed(err); }
+  });
+  loadPresetsList();
+
   document.getElementById('font-size-slider').addEventListener('input', (e) => {
     prefs.fontSize = parseInt(e.target.value);
     document.getElementById('font-size-value').textContent = prefs.fontSize + 'px';
@@ -4717,6 +4977,9 @@ function initOnlineStatus() {
   const refresh = () => {
     _isOnline = navigator.onLine;
     updateStatusBar();
+    // Re-verify actual reachability rather than trust the browser's online flag alone
+    // (see _presetsReachable) — this also calls renderPresetsUi() once it settles.
+    loadPresetsList();
   };
   window.addEventListener('online',  refresh);
   window.addEventListener('offline', refresh);
@@ -6873,16 +7136,22 @@ document.addEventListener('fullscreenchange', async () => {
 async function init() {
   await _i18nReady;
 
-  // If localStorage was cleared (no saved prefs), restore dict selection/order from the
-  // server copy so word lookups use the user's configured dictionaries, not the language default.
-  if (!localStorage.getItem('br_reader_prefs')) {
-    apiFetch('/settings').then(s => {
-      const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
-      if (sp.dictionaryOrder?.length) prefs.dictionaryOrder = sp.dictionaryOrder;
-      if (sp.dictionaries !== undefined) prefs.dictionaries = sp.dictionaries;
-      if (sp.dictionaryMeta) prefs.dictionaryMeta = sp.dictionaryMeta;
-    }).catch(() => {});
-  }
+  // Pull the last-synced settings from the server so a device that's already been used
+  // (not just a brand-new one) also stays in sync — persistPrefs() always pushes every
+  // change; this is what pulls it back, which is what actually keeps devices consistent.
+  // Fire-and-forget on purpose: book metadata loading below has its own timeout/offline
+  // races and must not block on this. If it resolves after this book's per-book overrides
+  // were already applied (loadBookPrefs() further down), reapply them on top so a
+  // slow-arriving global update can never clobber a book-specific override.
+  apiFetch('/settings').then(s => {
+    const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
+    mergeServerPrefs(sp);
+    activePresetId = s.active_preset_id ?? null;
+    if (currentBook?.id) loadBookPrefs(currentBook.id);
+    applyUiTheme();
+    reapplyStyles();
+    syncSettingsUi();
+  }).catch(() => {});
 
   log('[reader] UA:', navigator.userAgent.slice(0, 200));
   log('[reader] bookId:', bookId, 'online:', navigator.onLine);

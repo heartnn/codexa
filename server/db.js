@@ -175,6 +175,19 @@ function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
     );
+
+    -- Named reader-settings snapshots (font/theme/layout etc.), switchable from the
+    -- Theme tab. Deliberately excludes dictionary selection, which has its own
+    -- global sync + per-book-language-default logic (see user_settings.reader_prefs).
+    CREATE TABLE IF NOT EXISTS reader_presets (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      name       TEXT    NOT NULL,
+      prefs      TEXT    NOT NULL DEFAULT '{}',
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   console.log(`[db] SQLite initialized at ${DB_PATH}`);
@@ -240,6 +253,9 @@ function initDb() {
     [`ALTER TABLE users           ADD COLUMN oidc_provider          TEXT    DEFAULT NULL`,     'users.oidc_provider'],
     [`ALTER TABLE users           ADD COLUMN oidc_sub                TEXT    DEFAULT NULL`,     'users.oidc_sub'],
     [`ALTER TABLE users           ADD COLUMN email                   TEXT    DEFAULT NULL`,     'users.email'],
+    // Which reader_presets row (if any) the live reader_prefs currently matches — informational,
+    // lets the client highlight the active preset / offer "Update" vs "Save as new".
+    [`ALTER TABLE user_settings   ADD COLUMN active_preset_id        INTEGER DEFAULT NULL`,     'user_settings.active_preset_id'],
   ];
   for (const [sql, label] of migrations) {
     try {

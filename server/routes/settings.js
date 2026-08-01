@@ -8,6 +8,15 @@ const router = express.Router();
 // All settings routes require a valid JWT
 router.use(authenticateToken);
 
+// Dictionary selection has its own global sync + per-book-language-default logic
+// (see reader.js renderDictSettings/showDictPopup) — presets never capture or apply it.
+const DICTIONARY_KEYS = ['dictionaries', 'dictionaryOrder', 'dictionaryMeta'];
+function stripDictionaryKeys(prefs) {
+  const out = { ...(prefs || {}) };
+  for (const k of DICTIONARY_KEYS) delete out[k];
+  return out;
+}
+
 // ── GET /api/settings ─────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   const db  = getDb();
@@ -34,6 +43,7 @@ router.get('/', (req, res) => {
     bookorbit_account_username: row.bookorbit_account_username || '',
     has_bookorbit_account_password: (row.bookorbit_account_password_enc || '') !== '',
     reader_prefs:            JSON.parse(row.reader_prefs || '{}'),
+    active_preset_id:        row.active_preset_id,
   });
 });
 
@@ -45,7 +55,8 @@ router.put('/', (req, res) => {
   if (!row) return res.status(404).json({ error: 'Settings not found' });
 
   const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled,
-          bookorbit_sync_enabled, bookorbit_url, bookorbit_account_username, bookorbit_account_password, reader_prefs } = req.body;
+          bookorbit_sync_enabled, bookorbit_url, bookorbit_account_username, bookorbit_account_password,
+          reader_prefs, active_preset_id } = req.body;
 
   // Only update fields that were explicitly provided
   const next = {
@@ -60,6 +71,7 @@ router.put('/', (req, res) => {
     bookorbit_account_username:     bookorbit_account_username !== undefined ? String(bookorbit_account_username) : row.bookorbit_account_username,
     bookorbit_account_password_enc: bookorbit_account_password !== undefined ? String(bookorbit_account_password) : row.bookorbit_account_password_enc,
     reader_prefs:            reader_prefs    !== undefined ? JSON.stringify(reader_prefs)    : row.reader_prefs,
+    active_preset_id:        active_preset_id !== undefined ? active_preset_id               : row.active_preset_id,
   };
 
   db.prepare(`
@@ -73,7 +85,8 @@ router.put('/', (req, res) => {
            bookorbit_url                  = ?,
            bookorbit_account_username     = ?,
            bookorbit_account_password_enc = ?,
-           reader_prefs            = ?
+           reader_prefs            = ?,
+           active_preset_id        = ?
      WHERE user_id = ?
   `).run(
     next.opds_servers,
@@ -86,11 +99,66 @@ router.put('/', (req, res) => {
     next.bookorbit_account_username,
     next.bookorbit_account_password_enc,
     next.reader_prefs,
+    next.active_preset_id,
     req.user.id
   );
 
   // Kick an initial reconcile only when the toggle is newly turned on.
   if (row.bookorbit_sync_enabled !== 1 && next.bookorbit_sync_enabled === 1) bookorbit.triggerSync(req.user.id);
+
+  res.json({ success: true });
+});
+
+// ── Reader-settings presets ────────────────────────────────────────────────────
+// Named snapshots of reader_prefs (minus dictionary keys), switchable from the
+// reader's Theme tab and available on any device (stored server-side, not localStorage).
+
+router.get('/presets', (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT id, name, prefs, updated_at FROM reader_presets WHERE user_id = ? ORDER BY name COLLATE NOCASE'
+  ).all(req.user.id);
+  res.json(rows.map(r => ({ id: r.id, name: r.name, prefs: JSON.parse(r.prefs || '{}'), updated_at: r.updated_at })));
+});
+
+router.post('/presets', (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+
+  const db = getDb();
+  const prefs = JSON.stringify(stripDictionaryKeys(req.body.prefs));
+  const info = db.prepare(
+    'INSERT INTO reader_presets (user_id, name, prefs) VALUES (?, ?, ?)'
+  ).run(req.user.id, name, prefs);
+  const row = db.prepare('SELECT id, name, prefs, updated_at FROM reader_presets WHERE id = ?').get(info.lastInsertRowid);
+  res.json({ id: row.id, name: row.name, prefs: JSON.parse(row.prefs), updated_at: row.updated_at });
+});
+
+router.put('/presets/:id', (req, res) => {
+  const db  = getDb();
+  const row = db.prepare('SELECT * FROM reader_presets WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: 'Preset not found' });
+
+  const name  = req.body.name  !== undefined ? String(req.body.name).trim().slice(0, 60) : row.name;
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  const prefs = req.body.prefs !== undefined ? JSON.stringify(stripDictionaryKeys(req.body.prefs)) : row.prefs;
+
+  db.prepare(
+    `UPDATE reader_presets SET name = ?, prefs = ?, updated_at = strftime('%s','now') WHERE id = ? AND user_id = ?`
+  ).run(name, prefs, req.params.id, req.user.id);
+
+  const updated = db.prepare('SELECT id, name, prefs, updated_at FROM reader_presets WHERE id = ?').get(req.params.id);
+  res.json({ id: updated.id, name: updated.name, prefs: JSON.parse(updated.prefs), updated_at: updated.updated_at });
+});
+
+router.delete('/presets/:id', (req, res) => {
+  const db = getDb();
+  const info = db.prepare('DELETE FROM reader_presets WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'Preset not found' });
+
+  db.prepare(
+    'UPDATE user_settings SET active_preset_id = NULL WHERE user_id = ? AND active_preset_id = ?'
+  ).run(req.user.id, req.params.id);
 
   res.json({ success: true });
 });
