@@ -64,6 +64,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **Extensive text settings** — font, size, line height, letter spacing, paragraph indent, paragraph spacing, justification, hyphenation with per-language support
 - **Configurable status bar** — up to 6 overlay slots (top/bottom × left/centre/right) showing any combination of: chapter/book page numbers, pages left, progress %, time-to-finish, title, author, chapter, and current time
 - **Screen edge padding** — adjustable insets for curved-screen phones and notches
+- **Reader-settings presets** — save your theme, font, and layout settings as a named preset and switch between them from the Theme tab; presets sync across all your devices, while each device remembers which preset it's currently using (dictionary selection is not included in presets)
 
 ### Sync & Progress
 - **Automatic progress saving** — position saved locally and to the server; restored on any device
@@ -98,7 +99,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **OIDC login** — optional single sign-on via Google, Apple, or a self-hosted provider (Dex, Authelia, Keycloak, ...), alongside local accounts — see [OIDC Login](#oidc-login-google-apple-self-hosted) below
 
 ### Internationalisation
-- **7 languages** — English, Slovenian, German, Spanish, French, Italian, Portuguese
+- **8 languages** — English, Slovenian, German, Spanish, French, Italian, Portuguese, Simplified Chinese
 
 ---
 

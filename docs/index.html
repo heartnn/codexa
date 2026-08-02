@@ -196,6 +196,7 @@
 <li><a data-scroll="themes-eink" data-section="themes" href="#themes-eink">E-ink Mode</a></li>
 <li><a data-scroll="themes-app" data-section="themes" href="#themes-app">App Theme</a></li>
 <li><a data-scroll="themes-display" data-section="themes" href="#themes-display">Display Size</a></li>
+<li><a data-scroll="themes-presets" data-section="themes" href="#themes-presets">Presets</a></li>
 </ul>
 </li><li>
 <a data-section="languages" href="#languages">Supported Languages</a>
@@ -1541,12 +1542,51 @@ staticPasswords:
         and the Android app — Codexa automatically picks the right scaling technique for each
         platform, so the control behaves the same wherever you read.
       </div>
+<h2 id="themes-presets">Presets</h2>
+<p>
+        Save your current theme, font, and layout settings as a named preset, and switch between
+        them instantly from <strong>Reader → Settings → Theme</strong>. Handy for keeping, say, a
+        high-contrast setup for an e-ink device and a softer sepia setup for a phone, without
+        reconfiguring every setting each time you switch between them.
+      </p>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>Action</th><th>Effect</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Save as preset</strong></td><td>Creates a new preset from your current settings.</td></tr>
+<tr><td><strong>Update</strong></td><td>Overwrites the selected preset with your current settings.</td></tr>
+<tr><td><strong>Rename</strong></td><td>Renames the selected preset.</td></tr>
+<tr><td><strong>Delete</strong></td><td>Removes the selected preset.</td></tr>
+</tbody>
+</table>
+</div>
+<p>
+        A preset captures every setting across the Theme, Text, Page, Device, and Status Bar
+        tabs — <strong>except dictionary selection</strong>, which is never part of a preset and
+        keeps its own behaviour (matching a book's language automatically, or whatever you've set
+        manually).
+      </p>
+<div class="callout">
+<strong>Synced, but not shared, across devices</strong>
+        Your presets — their names and settings — are available on every device you log in to.
+        Which preset is currently applied, however, is remembered separately per device, so an
+        e-ink reader and a phone can each stay on their own preset instead of one device's choice
+        overwriting every other device's.
+      </div>
+<p>
+        Selecting a preset updates your current settings immediately; it does not touch any
+        per-book overrides already saved for the book you have open — use
+        <strong>Reset for this book</strong> at the top of the Settings panel if you want a
+        preset to fully take over a book with its own overrides.
+      </p>
 <a class="back-top" href="#about">↑ Top</a>
 </section>
 <!-- ══════════════════════════════════════════════ Supported Languages ═ -->
 <section id="languages">
 <h1>Supported Languages</h1>
-<p class="section-subtitle">The Codexa interface is available in 7 languages</p>
+<p class="section-subtitle">The Codexa interface is available in 8 languages</p>
 <div class="table-wrap">
 <table>
 <thead>
@@ -1560,6 +1600,7 @@ staticPasswords:
 <tr><td>Spanish</td><td><code>es</code></td><td>Available</td></tr>
 <tr><td>Portuguese</td><td><code>pt</code></td><td>Available</td></tr>
 <tr><td>Slovenian</td><td><code>sl</code></td><td>Available</td></tr>
+<tr><td>Simplified Chinese</td><td><code>zh-CN</code></td><td>Available</td></tr>
 </tbody>
 </table>
 </div>
@@ -2309,6 +2350,7 @@ staticPasswords:
 <li><strong>Override book styles:</strong> forces the reader's fonts and colours on books with their own CSS.</li>
 <li><strong>E-ink mode:</strong> high-contrast black-and-white for e-ink displays.</li>
 <li><strong>Page border (book spine):</strong> shows a thin shadow along the centre spine in two-page spread mode.</li>
+<li><strong>Presets:</strong> save and switch between named settings profiles — see <a data-scroll="themes-presets" data-section="themes" href="#themes-presets">Presets</a>.</li>
 </ul>
 <h4>Header buttons</h4>
 <p>

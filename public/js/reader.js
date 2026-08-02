@@ -1247,7 +1247,7 @@ ${_supportsWhere
   ? ':where(p) { margin-top: 0; margin-bottom: 0.3em; }'
   : 'p { margin-top: 0; margin-bottom: 0.3em; }'}
 ${fontOverrides}
-img:not(.codexa-dropcap-img) {
+img:not(.codexa-dropcap-img):not(a img) {
   max-width:   100% !important;
   max-height:  75vh !important;
   width:       auto !important;
@@ -1256,6 +1256,15 @@ img:not(.codexa-dropcap-img) {
   display:     block !important;
   margin-left: auto !important;
   margin-right: auto !important;
+  mix-blend-mode: multiply !important;
+}
+/* Images wrapped in a link (footnote/note markers, inline icons) are almost always meant
+   to sit inline with the surrounding text, sized by the book's own CSS — unlike standalone
+   illustrations, don't force them to display:block or override their width/height. */
+a img:not(.codexa-dropcap-img) {
+  max-width:  100% !important;
+  max-height: 75vh !important;
+  object-fit: contain !important;
   mix-blend-mode: multiply !important;
 }
 figure { background: transparent !important; background-color: transparent !important; }
