@@ -672,10 +672,51 @@ function applyPreset(id) {
   const preset = presetsList.find(p => p.id === id);
   if (!preset) return;
   const { dictionaries, dictionaryOrder, dictionaryMeta, ...rest } = preset.prefs;
+
+  // bionicReading rewrites the chapter DOM at render time (word-prefix spans); like its own
+  // settings-panel toggle (see 'bionic-reading-toggle' handler), changing it only takes
+  // effect after a reload — detect that up front so we reload the same way the toggle does,
+  // instead of silently leaving the old rendering in place until the user notices and reloads.
+  const bionicChanging = 'bionicReading' in rest && !!rest.bionicReading !== !!prefs.bionicReading;
+
   Object.assign(prefs, rest);
   activePresetId = id;
+
+  if (bionicChanging) {
+    persistPrefs();
+    saveBionicReloadState();
+    location.reload();
+    return;
+  }
+
   applyUiTheme();
+  // Sync column-layout state (two-column on/off, inter-column gap) from the preset's
+  // spread/margin BEFORE repaginating, so the single reapplyStyles() call below already
+  // paginates with the preset's layout in effect — otherwise it silently keeps whatever
+  // single/dual-page state the reader was in before the preset was applied.
+  if (_cxReader) {
+    _cxReader._twoColumn = cxWantsTwoCol();
+    _cxReader._columnGap = prefs.margin * 2;
+  }
   reapplyStyles();
+  // Every other setting category has its own dedicated "apply" function, normally invoked
+  // only by that setting's own control in the settings panel. A preset can change all of them
+  // at once, so re-run each here too — otherwise they silently keep whatever value was in
+  // effect before the preset switch until the next full reload.
+  applyStatusBarStyles();
+  renderStatusSlots();
+  applyEdgePadding();
+  applyNavZones();
+  applyHeaderButtonSize();
+  applyHeaderBtnVisibility();
+  applyFloatNavBtn();
+  applyPageShadow();
+  applyAutoHide();
+  updateBookmarkBadge();
+  updateAnnotationBadge();
+  if (prefs.keepScreenOn) acquireWakeLock(); else releaseWakeLock();
+  applyVolumeKeyMode(prefs.volumeKeysEnabled);
+  void applyPortraitLock(prefs.lockPortrait);
   syncSettingsUi();
   persistPrefs();
 }
