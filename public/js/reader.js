@@ -2848,12 +2848,19 @@ function applyEdgePadding() {
   root.style.setProperty('--edge-pad-left',   p.left   + 'px');
   // For CXReader: re-measure how much the status bars overlap the viewer (their position
   // shifts when edge-pad vars change), then re-apply the iframe inset and repaginate.
-  if (_cxReader) {
-    setTimeout(() => {
-      _cxMeasureViewerInset();
-      _cxReader.reapplyCss(buildEpubCss());
-    }, 30);
-  }
+  _cxRemeasureAndRepaginate();
+}
+
+// Re-measure the space #sb-top/#sb-bottom reserve and repaginate the open book. Call after
+// any change that can alter their rendered height (edge padding, status bar font size,
+// separators, item layout) — otherwise book content keeps the stale inset from the last
+// measurement (taken once, the first time a chapter renders) until a full reload.
+function _cxRemeasureAndRepaginate() {
+  if (!_cxReader) return;
+  setTimeout(() => {
+    _cxMeasureViewerInset();
+    _cxReader.reapplyCss(buildEpubCss());
+  }, 30);
 }
 
 // Apply CSS variables for status bar font/size/style
@@ -2891,6 +2898,8 @@ function applyStatusBarStyles() {
 
   // Progress bars
   applyProgressBarLayout();
+
+  _cxRemeasureAndRepaginate();
 }
 
 function applyProgressBarLayout() {
@@ -4261,12 +4270,14 @@ function renderSbItems() {
       if (newPos !== 'off') prefs.statusBar.positions[newPos].push(id);
       persistPrefs();
       renderStatusSlots();
+      _cxRemeasureAndRepaginate();
     });
 
     row.querySelector('.sb-icon-chk').addEventListener('change', (e) => {
       prefs.statusBar.showIcons[id] = e.target.checked;
       persistPrefs();
       renderStatusSlots();
+      _cxRemeasureAndRepaginate();
     });
 
     container.appendChild(row);
@@ -4583,8 +4594,10 @@ function initSettingsUi() {
     prefs.margin = parseInt(e.target.value);
     document.getElementById('margin-value').textContent = prefs.margin + 'px';
     // CXReader two-column mode: update the inter-column gap before re-applying CSS so
-    // _initPaginator uses the new gap (it's set via setLayout, not derived from CSS).
-    if (_cxReader) _cxReader.setLayout({ columnGap: prefs.margin * 2 });
+    // _initPaginator uses the new gap (it's set directly, not derived from CSS). Setting
+    // it here rather than via setLayout() avoids re-paginating twice (once with the old
+    // margin CSS, again a moment later inside reapplyStyles with the new CSS).
+    if (_cxReader) _cxReader._columnGap = prefs.margin * 2;
     reapplyStyles();
     persistPrefs();
   });
