@@ -21,6 +21,18 @@ function getDb() {
   return db;
 }
 
+// Closes the DB handle cleanly (checkpoints the WAL file back into codexa.db and releases the
+// native handle). Node gives WAL mode no chance to do this on its own — an abrupt process kill
+// (the default for SIGTERM with no handler, e.g. every `docker stop`/restart) leaves
+// codexa.db-wal/-shm in whatever state they were mid-write, and better-sqlite3 has to recover
+// that on the next open. Call this from a graceful-shutdown handler, not on every request path.
+function closeDb() {
+  if (db) {
+    db.close();
+    db = undefined;
+  }
+}
+
 function initDb() {
   const database = getDb();
 
@@ -320,4 +332,4 @@ function initDb() {
   }
 }
 
-module.exports = { getDb, initDb, DATA_DIR };
+module.exports = { getDb, initDb, closeDb, DATA_DIR };
