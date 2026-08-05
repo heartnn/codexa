@@ -1779,6 +1779,37 @@ function attachIframeKeyboard(contents) {
   }, { passive: true });
 }
 
+// Word-boundary detection shared by long-press / right-click / double-click "look up this
+// word". CJK scripts (Chinese, Japanese) don't separate words with spaces, so simply expanding
+// through consecutive Unicode letters (as the fallback below does) swallows an entire
+// punctuation-delimited clause as "one word" instead of stopping at a real word boundary.
+// Intl.Segmenter's dictionary-based word breaking (supported on Android/Chrome and Safari 14.1+)
+// gives real boundaries for those scripts; everything else (Latin, Korean — already
+// space-delimited) keeps using the cheaper regex walk, unchanged.
+let _cjkSegmenter = null;
+const CJK_NO_SPACE_RE = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/; // Han ideographs + Hiragana/Katakana
+
+function _resolveWordBounds(text, offset) {
+  const ch = text[offset] ?? text[offset - 1];
+  if (ch && CJK_NO_SPACE_RE.test(ch) && typeof Intl?.Segmenter === 'function') {
+    try {
+      _cjkSegmenter ||= new Intl.Segmenter(undefined, { granularity: 'word' });
+      for (const s of _cjkSegmenter.segment(text)) {
+        const end = s.index + s.segment.length;
+        if (offset >= s.index && offset < end) {
+          // isWordLike is false for punctuation/whitespace segments — treat like landing
+          // on punctuation with the regex walk below (empty word, no lookup).
+          return s.isWordLike ? { start: s.index, end } : { start: offset, end: offset };
+        }
+      }
+    } catch { /* fall through to the generic boundary walk below */ }
+  }
+  let s = offset, e = offset;
+  while (s > 0 && /[\p{L}\p{N}'’\-]/u.test(text[s - 1])) s--;
+  while (e < text.length && /[\p{L}\p{N}'’\-]/u.test(text[e])) e++;
+  return { start: s, end: e };
+}
+
 // Inject long-press (mobile) and right-click (desktop) dictionary lookup
 // into each epub.js iframe page. Uses postMessage to ask the host to show the popup.
 function attachIframeDictionary(contents) {
@@ -1813,9 +1844,7 @@ function attachIframeDictionary(contents) {
     }
     if (!node || node.nodeType !== 3) return '';
     const text = node.textContent;
-    let s = offset, e = offset;
-    while (s > 0 && /[\p{L}\p{N}'\u2019\-]/u.test(text[s - 1])) s--;
-    while (e < text.length && /[\p{L}\p{N}'\u2019\-]/u.test(text[e])) e++;
+    const { start: s, end: e } = _resolveWordBounds(text, offset);
     return text.slice(s, e).replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
   }
 
@@ -1837,9 +1866,7 @@ function attachIframeDictionary(contents) {
     }
     if (!node || node.nodeType !== 3) return null;
     const text = node.textContent;
-    let s = offset, e = offset;
-    while (s > 0 && /[\p{L}\p{N}'\u2019\-]/u.test(text[s - 1])) s--;
-    while (e < text.length && /[\p{L}\p{N}'\u2019\-]/u.test(text[e])) e++;
+    const { start: s, end: e } = _resolveWordBounds(text, offset);
     const word = text.slice(s, e).replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
     if (!word) return null;
     try {
@@ -1860,6 +1887,20 @@ function attachIframeDictionary(contents) {
     if (word === lastSelectionWord && now - lastSelectionTs < 900) return;
     lastSelectionWord = word;
     lastSelectionTs = now;
+    // The native selection (and its Android drag handles) stays on screen after this fires,
+    // rendering above the dict popup we're about to open. Swap it for our own lingering
+    // highlight mark (same visual used for long-press lookups, cleared by closeDictPopup()
+    // via scheduleClearPressHighlight()) and drop the native selection so the handles go away.
+    try {
+      if (sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        clearTimeout(_clearHlTimer); _clearHlTimer = null;
+        const hl = doc.createElement('mark');
+        hl.className = 'br-press-hl';
+        range.surroundContents(hl);
+      }
+    } catch { /* range spans element boundaries - leave native selection in place below */ }
+    sel.removeAllRanges?.();
     window.parent.postMessage({ type: 'dict-lookup', word }, '*');
   }
 
