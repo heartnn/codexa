@@ -166,8 +166,11 @@ router.post('/', authenticateToken, uploadDict.array('dict', 10), (req, res) => 
   res.json({ results });
 });
 
-// ── DELETE /api/dictionary/* — remove a dictionary folder ────────────────────
-// id may be a slash-separated path like "en-en/merriam-webster"
+// ── DELETE /api/dictionary/* — remove a dictionary's files ───────────────────
+// id may be a slash-separated path like "en-en/merriam-webster" — but that's
+// "<subdirectory>/<basename>" (see findAllIfo), not a real path on disk. A StarDict
+// dictionary is several sibling files sharing that basename (.ifo/.idx/.dict[.dz]/.syn)
+// inside the subdirectory, so removing `id` itself as a single file/directory always 404'd.
 router.delete('/*', authenticateToken, (req, res) => {
   const id       = req.params[0];
   const resolved = path.resolve(DICT_DIR, id);
@@ -177,8 +180,15 @@ router.delete('/*', authenticateToken, (req, res) => {
   for (const k of cache.keys()) {
     if (k === id || k.startsWith(id + '/')) cache.delete(k);
   }
-  if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'error.not_found' });
-  fs.rmSync(resolved, { recursive: true, force: true });
+  const dir  = path.dirname(resolved);
+  const stem = path.basename(resolved);
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'error.not_found' });
+  const siblings = fs.readdirSync(dir).filter(f => f === stem || f.startsWith(stem + '.'));
+  if (!siblings.length) return res.status(404).json({ error: 'error.not_found' });
+  for (const f of siblings) fs.rmSync(path.join(dir, f), { force: true });
+  // Upload creates one folder per ZIP (see POST above) — clean it up once its last
+  // dictionary is gone instead of leaving an empty folder behind in the listing.
+  try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { /* not empty, leave it */ }
   res.json({ ok: true });
 });
 
