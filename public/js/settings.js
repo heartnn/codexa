@@ -1,5 +1,5 @@
-import { apiFetch } from './api.js';
-import { toast, confirmDialog, setButtonLoading } from './ui.js';
+import { apiFetch, apiUpload } from './api.js';
+import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
 import { setBookorbitNavVisible } from './sidebar.js';
@@ -371,6 +371,13 @@ async function loadAdminDicts() {
   });
 }
 
+// Renders a showProgressToast() counter as MB — dictionary ZIPs especially can be large
+// enough that a raw byte counter (or no feedback at all, which is what this replaced) leaves
+// the upload looking hung for a while.
+function formatMB(loaded, total) {
+  return `${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`;
+}
+
 let _adminUploadsBound = false;
 function bindAdminUploads() {
   if (_adminUploadsBound) return;
@@ -381,13 +388,15 @@ function bindAdminUploads() {
     if (!files.length) return;
     this.value = '';
     for (const file of files) {
-      toast.info(`${t('reader.uploading')} ${file.name}…`);
+      const progress = showProgressToast(`${t('reader.uploading')} ${file.name}…`, formatMB);
       const fd = new FormData();
       fd.append('fonts', file);
       try {
-        await apiFetch('/fonts', { method: 'POST', body: fd });
+        await apiUpload('/fonts', fd, (loaded, total) => progress.update(loaded, total));
+        progress.dismiss(true);
         toast.success(file.name);
       } catch (e) {
+        progress.dismiss(true);
         toast.error(`${file.name}: ${e.message}`);
       }
     }
@@ -399,15 +408,17 @@ function bindAdminUploads() {
     if (!files.length) return;
     this.value = '';
     for (const file of files) {
-      toast.info(`${t('reader.uploading')} ${file.name}…`);
+      const progress = showProgressToast(`${t('reader.uploading')} ${file.name}…`, formatMB);
       const fd = new FormData();
       fd.append('dict', file);
       try {
-        const result = await apiFetch('/dictionary', { method: 'POST', body: fd });
+        const result = await apiUpload('/dictionary', fd, (loaded, total) => progress.update(loaded, total));
+        progress.dismiss(true);
         const r = result.results?.[0];
         if (r?.error) toast.error(`${file.name}: ${r.error}`);
         else toast.success(file.name);
       } catch (e) {
+        progress.dismiss(true);
         toast.error(`${file.name}: ${e.message}`);
       }
     }

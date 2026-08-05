@@ -83,7 +83,11 @@ export function showProgressToast(label, formatCount) {
       el.querySelector('.toast-progress-counter').textContent =
         formatCount ? formatCount(current, total) : `${current} / ${total}`;
     },
-    dismiss() {
+    // instant: skip the fade and remove right away — use when a follow-up toast (e.g. a
+    // success/error result) is about to appear immediately after, so the two don't overlap
+    // on screen for the ~300ms the fade would otherwise take.
+    dismiss(instant = false) {
+      if (instant) { el.remove(); return; }
       el.style.opacity = '0';
       el.style.transition = 'opacity .3s';
       setTimeout(() => el.remove(), 320);
