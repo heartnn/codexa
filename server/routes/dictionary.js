@@ -39,9 +39,8 @@ function findAllIfo(dir = DICT_DIR, base = '') {
   return results;
 }
 
-function loadDict(id) {
-  if (cache.has(id)) return cache.get(id);
-  // Resolve to an absolute path, then verify it's still inside DICT_DIR (no traversal)
+// Resolve a dictionary id to its .ifo path, verifying it's still inside DICT_DIR (no traversal).
+function resolveIfoPath(id) {
   const resolved = path.resolve(DICT_DIR, id + '.ifo');
   if (!resolved.startsWith(path.resolve(DICT_DIR) + path.sep) && resolved !== path.resolve(DICT_DIR)) {
     const err = new Error('Invalid dictionary id: ' + id);
@@ -53,9 +52,28 @@ function loadDict(id) {
     err.status = 404;
     throw err;
   }
-  const d        = new StarDict(resolved);
+  return resolved;
+}
+
+function loadDict(id) {
+  if (cache.has(id)) return cache.get(id);
+  const d = new StarDict(resolveIfoPath(id));
   d.load();
   cache.set(id, d);
+  return d;
+}
+
+// Lightweight variant for listing: only reads the .ifo file (name/wordcount are both declared
+// there directly), never the .idx/.syn — those can be genuinely large for CJK dictionaries
+// (hundreds of thousands of entries) and fully parsing every installed dictionary just to list
+// them was blocking/crashing the Settings → Dictionaries tab on some setups. Reuses an
+// already-fully-loaded instance from `cache` when one exists (nothing extra to do), but never
+// caches a meta-only instance under the same key — that would poison later lookups by making
+// them think the dictionary is already loaded when it never parsed the actual index.
+function loadDictMeta(id) {
+  if (cache.has(id)) return cache.get(id);
+  const d = new StarDict(resolveIfoPath(id));
+  d.loadMeta();
   return d;
 }
 
@@ -75,9 +93,9 @@ function inferDictLangs(id) {
 router.get('/', authenticateToken, (req, res) => {
   ensureDictDir();
   try {
-    const dicts = findAllIfo().map(({ id, ifoPath }) => {
+    const dicts = findAllIfo().map(({ id }) => {
       try {
-        const d    = loadDict(id);
+        const d    = loadDictMeta(id);
         const langs = inferDictLangs(id);
         return { id, name: d.name, wordcount: d.wordcount, ...langs };
       } catch { return null; }

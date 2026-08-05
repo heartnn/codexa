@@ -170,6 +170,18 @@ class StarDict {
     this._synIndex  = null;  // Map: normalizeWord(synonym)  → entry[]  (from .syn file)
     this._dictBuf = null;    // lazy-loaded
     this._loaded  = false;
+    this._metaLoaded = false;
+  }
+
+  // Cheap: just the .ifo text file (a handful of "key=value" lines). Enough for listing
+  // (name/wordcount are both declared directly in .ifo metadata) without touching the
+  // .idx/.syn files — those can be large (hundreds of thousands of entries for big CJK
+  // dictionaries) and parsing them is real synchronous CPU/memory work that a "what
+  // dictionaries do I have" listing has no need to pay for.
+  loadMeta() {
+    if (this._metaLoaded || this._loaded) return;
+    this._parseIfo();
+    this._metaLoaded = true;
   }
 
   load() {
