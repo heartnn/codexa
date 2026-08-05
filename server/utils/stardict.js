@@ -34,7 +34,13 @@ function generateCandidates(raw) {
   const w    = raw.toLowerCase().trim();
   const seen = new Set();
   const out  = [];
-  const add  = (s) => { if (s && s.length > 1 && !seen.has(s)) { seen.add(s); out.push(s); } };
+  // NOTE: every heuristic rule below already guards on `w.length > N` before stripping a
+  // suffix, so none of them can ever produce a degenerate 0-1 char stem here — this only
+  // needs to reject empty strings. (It used to also require length > 1, which silently
+  // dropped the exact-form candidate for any genuinely 1-character headword — e.g. a single
+  // CJK character like 传, or English "a"/"I" — meaning lookup() was never even attempted
+  // for those words.)
+  const add  = (s) => { if (s && !seen.has(s)) { seen.add(s); out.push(s); } };
 
   add(w);  // always try exact first
 

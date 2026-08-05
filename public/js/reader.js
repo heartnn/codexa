@@ -1925,6 +1925,22 @@ function attachIframeDictionary(contents) {
           return;
         }
       }
+      // CJK scripts (Chinese/Japanese) have no spaces between words, so — unlike Latin text,
+      // where the regex/segment boundary below is essentially always the word the user meant —
+      // a single long-press can't reliably guess whether they want this character alone or as
+      // part of an adjacent compound. We never call preventDefault() on these touch listeners,
+      // so on Android, the OS's own native long-press-to-select (word-breaking + draggable
+      // handles) is ALSO running in parallel with this timer; immediately clearing the selection
+      // and opening our own UI (as the Latin-script path below does) fights that native gesture
+      // and wins the race almost every time, which is exactly why the selection couldn't be
+      // dragged to extend/shrink and handles only ever showed up when landing on punctuation
+      // (where getWordRangeAtPoint returns null and this code never runs). Back off for CJK and
+      // let native selection do the picking instead — the touchend listeners further down
+      // (triggerSelectionLookup / onSelectionEnd in attachIframeAnnotation) already handle "user
+      // finished a manual selection" and react to whatever the user ends up with. iOS is excluded:
+      // it disables native selection entirely (see the iosStyle block above), so backing off
+      // there would leave nothing to take over and the long-press would do nothing at all.
+      if (!isIOS && CJK_NO_SPACE_RE.test(word[0])) return;
       win.getSelection?.()?.removeAllRanges?.();
       let cfiRange = '';
       if (prefs.bionicReading) {
