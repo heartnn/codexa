@@ -476,7 +476,8 @@ body.is-offline .app-version { display: none; }
 html[data-lib-theme="eink"] .nav-icon-offline { content: url('/images/offline_bw.svg'); }
 body.is-offline #nav-settings,
 body.is-offline #nav-opds,
-body.is-offline #nav-bookorbit { opacity: 0.4; cursor: not-allowed; }
+body.is-offline #nav-bookorbit,
+body.is-offline #nav-bookorbit-dash { opacity: 0.4; cursor: not-allowed; }
 body.is-offline .sidebar-shelf-item,
 body.is-offline #add-shelf-btn { opacity: 0.4; cursor: not-allowed; }
 body.is-offline #sidebar-stats-btn { opacity: 0.4; cursor: not-allowed; }
@@ -1364,6 +1365,45 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
   border-top: 1px solid var(--color-border);
   flex-wrap: wrap;
 }
+
+/* ── BookOrbit Dash (reading-stats panel fed by BookOrbit's own account-wide data) ── */
+.bookorbit-dash-wrap { max-width: 720px; margin: 0 auto; }
+.bookorbit-dash-title { font-size: 1.15rem; font-weight: 600; margin: 0 0 1.25rem; }
+.bookorbit-dash-section { margin-top: 1.5rem; }
+.bod-streak-dots { display: flex; gap: .25rem; justify-content: center; margin-top: .4rem; }
+.bod-streak-dot {
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--color-border);
+  display: inline-block;
+}
+.bod-streak-dot.filled { background: var(--color-accent); }
+.bod-goal-card { cursor: pointer; }
+.bod-goal-card:hover, .bod-goal-card:focus-visible { background: var(--color-border); }
+.bod-book-row[role="button"] { cursor: pointer; border-radius: var(--radius); padding: .3rem; margin: -0.3rem; }
+.bod-book-row[role="button"]:hover, .bod-book-row[role="button"]:focus-visible { background: var(--color-surface2); }
+.bod-progress-track {
+  width: 100%;
+  height: .3rem;
+  background: var(--color-border);
+  border-radius: 3px;
+  margin-top: .3rem;
+  overflow: hidden;
+}
+.bod-progress-bar { height: 100%; background: var(--color-accent); }
+.bod-highlight-card {
+  display: flex;
+  gap: .75rem;
+  background: var(--color-surface2);
+  border-radius: var(--radius);
+  padding: .75rem;
+}
+.bod-highlight-card.bod-clickable { cursor: pointer; }
+.bod-highlight-card.bod-clickable:hover, .bod-highlight-card.bod-clickable:focus-visible { background: var(--color-border); }
+.bod-highlight-body { min-width: 0; }
+.bod-highlight-text { font-size: .9rem; font-style: italic; margin: 0 0 .3rem; }
+.bod-highlight-note { font-size: .8rem; color: var(--color-text-muted); margin: 0 0 .3rem; }
 
 /* ── Language picker (custom dropdown, same look as sort menu) ───────────────── */
 .lang-picker-icon {

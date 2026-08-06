@@ -550,7 +550,30 @@ function mapRecBook(b) {
   };
 }
 
-const EMPTY_RELATED = { enabled: true, mapped: false, recommendations: [], seriesBooks: [], nextInSeries: null };
+const EMPTY_RELATED = { enabled: true, mapped: false, recommendations: [], seriesBooks: [], nextInSeries: null, authorBooks: [] };
+
+// Shared by getRecommendations() (local bookId, used by the local book info modal's Related tab)
+// and getRelatedByBoId() (direct boBookId, used by the BookOrbit library's own detail modal for
+// books that may not be imported into Codexa yet — there's no local mapping to resolve there).
+async function fetchRelated(userId, ctx, boBookId) {
+  const [recRes, seriesRes, authorRes] = await Promise.all([
+    api(userId, ctx, 'GET', `/books/${boBookId}/recommendations`),
+    api(userId, ctx, 'GET', `/books/${boBookId}/series-books`),
+    api(userId, ctx, 'GET', `/books/${boBookId}/author-books`),
+  ]);
+
+  const recommendations = (recRes.ok && Array.isArray(recRes.data) ? recRes.data : []).map(mapRecBook);
+
+  const seriesRaw = seriesRes.ok && Array.isArray(seriesRes.data) ? seriesRes.data : [];
+  const idx = seriesRaw.findIndex(b => b.id === boBookId);
+  const nextInSeries = idx >= 0 && idx + 1 < seriesRaw.length ? mapRecBook(seriesRaw[idx + 1]) : null;
+  const seriesBooks = seriesRaw.filter(b => b.id !== boBookId).map(mapRecBook);
+
+  const authorBooks = (authorRes.ok && Array.isArray(authorRes.data) ? authorRes.data : [])
+    .filter(b => b.id !== boBookId).map(mapRecBook);
+
+  return { recommendations, seriesBooks, nextInSeries, authorBooks };
+}
 
 async function getRecommendations(userId, bookId) {
   const ctx = getContext(userId);
@@ -563,19 +586,16 @@ async function getRecommendations(userId, bookId) {
   try { if (!tokens.has(userId)) await login(userId, ctx); }
   catch { return EMPTY_RELATED; }
 
-  const [recRes, seriesRes] = await Promise.all([
-    api(userId, ctx, 'GET', `/books/${m.boBookId}/recommendations`),
-    api(userId, ctx, 'GET', `/books/${m.boBookId}/series-books`),
-  ]);
+  const related = await fetchRelated(userId, ctx, m.boBookId);
+  return { enabled: true, mapped: true, ...related };
+}
 
-  const recommendations = (recRes.ok && Array.isArray(recRes.data) ? recRes.data : []).map(mapRecBook);
-
-  const seriesRaw = seriesRes.ok && Array.isArray(seriesRes.data) ? seriesRes.data : [];
-  const idx = seriesRaw.findIndex(b => b.id === m.boBookId);
-  const nextInSeries = idx >= 0 && idx + 1 < seriesRaw.length ? mapRecBook(seriesRaw[idx + 1]) : null;
-  const seriesBooks = seriesRaw.filter(b => b.id !== m.boBookId).map(mapRecBook);
-
-  return { enabled: true, mapped: true, recommendations, seriesBooks, nextInSeries };
+// For a book identified directly by its BookOrbit id (catalog browsing in bookorbit.js — the
+// caller already has boBookId in hand, no local bookId->boBookId resolution needed).
+async function getRelatedByBoId(userId, ctx, boBookId) {
+  try { if (!tokens.has(userId)) await login(userId, ctx); }
+  catch { return { recommendations: [], seriesBooks: [], nextInSeries: null, authorBooks: [] }; }
+  return fetchRelated(userId, ctx, boBookId);
 }
 
 // Fetch a BookOrbit-hosted image (thumbnail) through our own server so the browser never
@@ -703,6 +723,7 @@ module.exports = {
   parseBoIds,
   VALID_STATUS,
   getRecommendations,
+  getRelatedByBoId,
   getCover,
   api,
   fetchAsset,
