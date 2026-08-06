@@ -2,11 +2,15 @@
 # Installs all deps (including devDeps for esbuild), transpiles public/ → dist/
 # for Chrome 69 / older Android WebView, then prunes devDeps before handoff.
 #
-# Debian-based (not -alpine): better-sqlite3/bcrypt are native addons, and Alpine's musl libc
-# has been the source of flaky, non-deterministic native-init crashes for them (seen as
-# "Assertion failed: (env) != nullptr" in node::RemoveEnvironmentCleanupHook, firing on maybe
-# 1 in 3 startups) that don't reproduce outside Alpine at all. glibc (this image) doesn't have
-# that failure mode.
+# Debian-based (not -alpine): kept since it's already proven stable, but the actual root
+# cause of the native crash ("Assertion failed: (env) != nullptr" in
+# node::RemoveEnvironmentCleanupHook, thrown from better-sqlite3's Statement destructor) was
+# better-sqlite3@11.x predating Node 24 support: it had no prebuilt binary for Node 24's ABI,
+# so npm fell back to compiling from source against a version never actually tested against
+# Node 24, producing a subtly broken binary that crashed intermittently (on startup, or later
+# on the first real query, depending on timing). Fixed by bumping better-sqlite3 to ^13.x
+# (package.json), which ships real prebuilt N-API binaries for Node 24 for both glibc and
+# musl, so no native compilation happens for it anymore either way.
 FROM node:24-bookworm-slim AS build
 
 WORKDIR /app
