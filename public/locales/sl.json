@@ -773,5 +773,7 @@
   "error.not_found": "Datoteka ni bila najdena.",
   "error.opds_not_epub": "Izbrani vnos OPDS ni datoteka EPUB.",
   "error.opds_server_not_found": "Strežnik OPDS ni bil najden.",
-  "error.zip_required": "Zahtevana je datoteka ZIP."
+  "error.zip_required": "Zahtevana je datoteka ZIP.",
+  "error.invalid_lang_code": "Jezikovna koda mora imeti 2-3 črke (npr. \"en\", \"zh\").",
+  "error.dict_name_conflict": "Slovar s tem imenom za ta jezikovni par že obstaja."
 }

@@ -773,5 +773,7 @@
  "error.not_found": "未找到文件。",
  "error.opds_not_epub": "选定的 OPDS 条目不是 EPUB 文件。",
  "error.opds_server_not_found": "未找到 OPDS 服务器。",
- "error.zip_required": "需要 ZIP 文件。 "
+ "error.zip_required": "需要 ZIP 文件。 ",
+ "error.invalid_lang_code": "语言代码必须为 2-3 个字母（例如 \"en\"、\"zh\"）。",
+ "error.dict_name_conflict": "该语言对已存在同名词典。"
 }

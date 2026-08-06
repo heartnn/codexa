@@ -192,4 +192,56 @@ router.delete('/*', authenticateToken, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── PUT /api/dictionary/* — set/clear a dictionary's default language pair ───
+// Reuses the same folder-based convention findAllIfo()/inferDictLangs() already read from
+// (see above) instead of adding new storage: moves the dictionary's sibling files into (or out
+// of) a "<lang_from>-<lang_to>/" folder, keeping its own basename intact so two dictionaries
+// sharing a language pair (e.g. two different en-sl dictionaries) never collide — same as how
+// manually-placed dictionaries already coexist under one lang-pair folder today.
+// body: { lang_from, lang_to } — both optional/nullable; omitting both moves it back to a bare
+// "<basename>/" folder (no inferred language, same shape as a fresh, never-tagged upload).
+// Returns the new id, since renaming/moving inherently changes it.
+const LANG_CODE_RE = /^[a-z]{2,3}$/i;
+
+router.put('/*', authenticateToken, (req, res) => {
+  const id       = req.params[0];
+  const resolved = path.resolve(DICT_DIR, id);
+  if (!resolved.startsWith(path.resolve(DICT_DIR) + path.sep)) {
+    return res.status(400).json({ error: 'error.invalid_path' });
+  }
+
+  const oldDir = path.dirname(resolved);
+  const stem   = path.basename(resolved);
+  if (!fs.existsSync(oldDir)) return res.status(404).json({ error: 'error.not_found' });
+  const siblings = fs.readdirSync(oldDir).filter(f => f === stem || f.startsWith(stem + '.'));
+  if (!siblings.length) return res.status(404).json({ error: 'error.not_found' });
+
+  let { lang_from, lang_to } = req.body || {};
+  lang_from = lang_from ? String(lang_from).trim().toLowerCase() : null;
+  lang_to   = lang_to   ? String(lang_to).trim().toLowerCase()   : null;
+  if ((lang_from && !LANG_CODE_RE.test(lang_from)) || (lang_to && !LANG_CODE_RE.test(lang_to))) {
+    return res.status(400).json({ error: 'error.invalid_lang_code' });
+  }
+
+  const newDirName = (lang_from && lang_to) ? `${lang_from}-${lang_to}` : stem;
+  const newDir     = path.join(DICT_DIR, newDirName);
+
+  if (path.resolve(newDir) !== path.resolve(oldDir)) {
+    fs.mkdirSync(newDir, { recursive: true });
+    for (const f of siblings) {
+      if (fs.existsSync(path.join(newDir, f))) {
+        return res.status(409).json({ error: 'error.dict_name_conflict' });
+      }
+    }
+    for (const f of siblings) fs.renameSync(path.join(oldDir, f), path.join(newDir, f));
+    try { if (!fs.readdirSync(oldDir).length) fs.rmdirSync(oldDir); } catch { /* not empty, leave it */ }
+  }
+
+  for (const k of cache.keys()) {
+    if (k === id || k.startsWith(id + '/')) cache.delete(k);
+  }
+
+  res.json({ id: `${newDirName}/${stem}`, lang_from, lang_to });
+});
+
 module.exports = router;

@@ -340,6 +340,11 @@ async function loadAdminFonts() {
   });
 }
 
+// Path-encodes a dictionary id (e.g. "en-en/merriam-webster") for use after /dictionary/ in a URL.
+function encodeDictId(id) {
+  return id.split('/').map(encodeURIComponent).join('/');
+}
+
 async function loadAdminDicts() {
   const list = document.getElementById('admin-dicts-list');
   if (!list) return;
@@ -355,18 +360,61 @@ async function loadAdminDicts() {
         <span class="admin-user-name">${escHtml(d.name)}</span>
         ${d.wordcount ? `<span class="admin-user-meta">${d.wordcount.toLocaleString()} ${t('reader.dict_words')}</span>` : ''}
       </div>
+      <div class="dict-lang-inputs">
+        <input type="text" class="dict-lang-from" value="${escHtml(d.lang_from || '')}" maxlength="10"
+          placeholder="${t('settings.dict_lang_placeholder')}"
+          title="${t('settings.dict_lang_from')}" aria-label="${t('settings.dict_lang_from')}">
+        <span class="dict-lang-sep">→</span>
+        <input type="text" class="dict-lang-to" value="${escHtml(d.lang_to || '')}" maxlength="10"
+          placeholder="${t('settings.dict_lang_placeholder')}"
+          title="${t('settings.dict_lang_to')}" aria-label="${t('settings.dict_lang_to')}">
+      </div>
       <button class="btn btn-danger btn-sm">${t('common.delete')}</button>
     </div>
   `).join('');
   list.querySelectorAll('[data-dict-id]').forEach(row => {
+    const id = row.dataset.dictId;
     row.querySelector('button').addEventListener('click', async () => {
-      const id = row.dataset.dictId;
       try {
-        await apiFetch(`/dictionary/${id.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE' });
-        await loadAdminDicts();
+        await apiFetch(`/dictionary/${encodeDictId(id)}`, { method: 'DELETE' });
+        await Promise.all([loadAdminDicts(), loadDictPrefs()]);
       } catch (err) {
         toast.error(t('common.error_msg', { msg: err.message }));
       }
+    });
+    // Sets this dictionary's global default language (applies to every user who hasn't set
+    // their own per-user override in the Dictionaries tab) — moves it into/out of a
+    // "<lang_from>-<lang_to>/" folder server-side, see PUT /api/dictionary/*.
+    // Commits on focusout of the *pair* (not per-field 'change') — a per-field 'change' fires as
+    // soon as you tab/click from "from" into "to", saving a still-half-filled value and
+    // rebuilding the whole list mid-edit, which wiped out whatever hadn't been saved yet. Only
+    // save once focus actually leaves both inputs, using both of their values at that point.
+    const langWrap   = row.querySelector('.dict-lang-inputs');
+    const fromInput  = row.querySelector('.dict-lang-from');
+    const toInput    = row.querySelector('.dict-lang-to');
+    const initialFrom = fromInput.value.trim().toLowerCase();
+    const initialTo   = toInput.value.trim().toLowerCase();
+
+    async function commitLangChange() {
+      const fromVal = fromInput.value.trim().toLowerCase();
+      const toVal   = toInput.value.trim().toLowerCase();
+      if (fromVal === initialFrom && toVal === initialTo) return; // nothing actually changed
+      try {
+        await apiFetch(`/dictionary/${encodeDictId(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ lang_from: fromVal || null, lang_to: toVal || null }),
+        });
+        await Promise.all([loadAdminDicts(), loadDictPrefs()]);
+      } catch (err) {
+        toast.error(t('common.error_msg', { msg: err.message }));
+      }
+    }
+    langWrap.addEventListener('focusout', (e) => {
+      if (langWrap.contains(e.relatedTarget)) return; // focus moved to the other lang input — not done yet
+      commitLangChange();
+    });
+    [fromInput, toInput].forEach(inp => {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
     });
   });
 }
@@ -422,7 +470,9 @@ function bindAdminUploads() {
         toast.error(`${file.name}: ${e.message}`);
       }
     }
-    await loadAdminDicts();
+    // Also refresh the Dictionaries tab's own separate list (#settings-dict-list) — otherwise a
+    // freshly uploaded dictionary doesn't show up there until Settings is reopened.
+    await Promise.all([loadAdminDicts(), loadDictPrefs()]);
   });
 }
 
@@ -482,11 +532,11 @@ async function loadDictPrefs() {
         ${d.wordcount ? `<span class="dict-settings-count">${d.wordcount.toLocaleString()} ${t('reader.dict_words')}</span>` : ''}
       </div>
       <div class="dict-lang-inputs">
-        <input type="text" class="dict-lang-from" value="${escHtml(lf)}" maxlength="3"
+        <input type="text" class="dict-lang-from" value="${escHtml(lf)}" maxlength="10"
           placeholder="${t('settings.dict_lang_placeholder')}"
           title="${t('settings.dict_lang_from')}" aria-label="${t('settings.dict_lang_from')}">
         <span class="dict-lang-sep">→</span>
-        <input type="text" class="dict-lang-to" value="${escHtml(lt)}" maxlength="3"
+        <input type="text" class="dict-lang-to" value="${escHtml(lt)}" maxlength="10"
           placeholder="${t('settings.dict_lang_placeholder')}"
           title="${t('settings.dict_lang_to')}" aria-label="${t('settings.dict_lang_to')}">
       </div>

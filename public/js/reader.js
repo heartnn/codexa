@@ -3804,7 +3804,7 @@ async function renderDictSettings() {
   const rawLang  = (_cxReader && _cxReader._book?.metadata?.language) || currentBook?.language;
   const bookLang = normalizeBookLang(rawLang);
   const defaultIds = bookLang
-    ? (dicts.filter(d => (prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang).map(d => d.id))
+    ? (dicts.filter(d => normalizeBookLang(prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang).map(d => d.id))
     : [];
   const defaultEnabledIds = defaultIds.length ? defaultIds : allIds;
   // enabled set: null = none; [] = default (book-language match, or all); [...] = explicit list
@@ -3920,7 +3920,7 @@ async function showDictPopup(word) {
     const allIds   = dicts.map(d => d.id);
     if (bookLang) {
       const matched = dicts
-        .filter(d => (prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang)
+        .filter(d => normalizeBookLang(prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang)
         .map(d => d.id);
       enabled = matched.length ? matched : allIds; // fallback to all if no tagged match
     } else {

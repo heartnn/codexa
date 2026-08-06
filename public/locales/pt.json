@@ -773,5 +773,7 @@
   "error.not_found": "Arquivo não encontrado.",
   "error.opds_not_epub": "A entrada OPDS selecionada não é um arquivo EPUB.",
   "error.opds_server_not_found": "Servidor OPDS não encontrado.",
-  "error.zip_required": "É necessário um arquivo ZIP."
+  "error.zip_required": "É necessário um arquivo ZIP.",
+  "error.invalid_lang_code": "O código do idioma deve ter 2-3 letras (ex. \"en\", \"zh\").",
+  "error.dict_name_conflict": "Já existe um dicionário com esse nome para esse par de idiomas."
 }
