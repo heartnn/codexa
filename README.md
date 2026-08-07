@@ -50,6 +50,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **Highlights & annotations** — highlight in four colours (yellow, green, blue, pink) with optional notes; tap any highlight to edit or delete
 - **Search** — full-text search within a book with result navigation and back/accept buttons
 - **Dictionary lookup** — double-tap any word; supports multiple local StarDict dictionaries (`.ifo/.idx/.dict`); defaults to dictionaries matching a book's own language on first open
+- **CJK-aware word selection** — proper Chinese/Japanese/Korean word segmentation (not just per-character), including single-character lookups; on mobile, selecting CJK text uses the OS's own native selection handles so a selection can be extended/adjusted normally
 - **Footnote popup** — inline footnote and endnote display without leaving the page
 - **Bionic reading** — emphasises word prefixes to guide the eye for faster reading
 - **Two-page spread** — optional side-by-side layout for wider screens
@@ -71,6 +72,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **KOReader sync** — built-in KOSync-compatible server; connect KOReader devices with no extra software
 - **External KOSync server** — also works with a separate KOSync server; conflict-resolution dialog when positions differ
 - **BookOrbit extended sync** — optional two-way sync of highlights, reading sessions, live reading progress, and book status/rating with a self-hosted BookOrbit server
+- **BookOrbit Dash** — a dedicated sidebar panel showing account-wide reading stats from a connected BookOrbit server: current/longest reading streak, an editable yearly reading goal, a currently-reading shelf, library overview (books/authors/series/storage), and a daily highlight pulled from your synced annotations
 - **Interrupted session recovery** — banner on next visit offers one-tap resume if the app was closed mid-chapter
 
 ### Offline & Mobile
@@ -87,14 +89,15 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **OPDS shelf sync** — bulk-download an entire OPDS folder into a shelf; stale-book detection
 - **BookOrbit library browser** — native browsing of a self-hosted BookOrbit server's libraries, smart scopes, collections, series, and authors; add books to Codexa, peek them without downloading, edit collection membership, and view any book on BookOrbit directly
 - **BookOrbit collection/smart scope sync** — link a shelf to a BookOrbit collection or smart scope for one-click resync, same as OPDS shelf sync
+- **Related books** — "Similar books," "More by author," and "More in series" recommendations powered by a connected BookOrbit server, shown in both the local book info modal and the BookOrbit library's own book detail modal
 - **Reading statistics** — time read, pages turned, sessions, books started/finished, per-book history
 - **Series support** — series name, number, and one-click series filter
 - **Sort & search** — sort by date, title, author, progress, or series; real-time library search
 
 ### Admin
 - **User management** — view all users, delete accounts
-- **Font management** — upload and delete custom fonts available to all users
-- **Dictionary management** — upload StarDict ZIP archives, delete dictionaries
+- **Font management** — upload (with progress indicator) and delete custom fonts available to all users
+- **Dictionary management** — upload StarDict ZIP archives (with progress indicator), delete dictionaries
 - **Registration control** — enable or disable new-user sign-up
 - **OIDC login** — optional single sign-on via Google, Apple, or a self-hosted provider (Dex, Authelia, Keycloak, ...), alongside local accounts — see [OIDC Login](#oidc-login-google-apple-self-hosted) below
 
@@ -325,6 +328,10 @@ as you close the reader.
 ## BookOrbit
 
 Add your server URL in **Settings → BookOrbit** to enable the native library browser (libraries, smart scopes, collections, series, authors) and, optionally, two-way sync of highlights, reading sessions, reading progress, and status/rating. Requires BookOrbit **v2.1.0 or higher**.
+
+Once extended sync is on, two more things become available:
+- **BookOrbit Dash** — a sidebar panel with account-wide reading stats: reading streak, an editable yearly reading goal, currently-reading shelf, library overview, and a daily highlight from your synced annotations. These use BookOrbit's own reading-session and dashboard APIs — since Codexa already reports reading sessions to BookOrbit as part of extended sync, the numbers reflect real activity from the moment sync is turned on.
+- **Related books** — a "Related" tab (Similar books / More by author / More in series) on book detail views, both for your own library and while browsing BookOrbit's catalogue. Powered by BookOrbit's recommendation engine — books with too little reading/rating history may show fewer or no results, and a very old BookOrbit server without these APIs will simply show an empty tab.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "codexa",
-  "version": "2.5.3",
+  "version": "2.5.4Beta6",
   "description": "EPUB web reader with OPDS browsing and KOReader sync support",
   "main": "server/index.js",
   "engines": {
@@ -19,7 +19,7 @@
   "dependencies": {
     "adm-zip": "^0.6.0",
     "bcrypt": "^6.0.0",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

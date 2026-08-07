@@ -9,6 +9,20 @@ const READER_BUILD = 'br-v89-cxreader-only';
 const _i18nReady = initI18n();
 log('[codexa] reader build', READER_BUILD);
 
+// initI18n() reveals the page (visibility:hidden → '', set by the inline script in <head>) as
+// soon as locale strings are ready — usually off a cached locale, faster than reader.html's
+// safe-area probe settling. That showed --sat as an unsettled/wrong value for a beat, then
+// visibly snapped once the probe finished — the "screen jump" right after opening a book.
+// Re-hide immediately if insets aren't settled yet, and reveal again once they are; if they
+// already were, this costs one harmless same-tick hide+reveal, imperceptible to the user.
+_i18nReady.then(() => {
+  if (!window.__insetsReadyPromise) return; // script blocked/absent — don't get stuck hidden
+  document.documentElement.style.visibility = 'hidden';
+  window.__insetsReadyPromise.then(() => {
+    document.documentElement.style.visibility = '';
+  });
+});
+
 // Module-level detection (mirrors init()'s _legacyWebView) so module-scope code can guard
 // features that break Chrome 83 Android WebView.
 const _isLegacyWv = /\bwv\b/.test(navigator.userAgent) &&
@@ -1817,7 +1831,7 @@ function attachIframeDictionary(contents) {
   const doc = contents.document;
   const win = contents.window;
   const coarsePointer = !!win.matchMedia?.('(pointer: coarse)')?.matches;
-  let pressTimer = null, pressX = 0, pressY = 0, selectionTimer = null, lastSelectionWord = '', lastSelectionTs = 0;
+  let pressTimer = null, pressX = 0, pressY = 0;
 
   // iOS: suppress native callout and text-selection takeover inside epub iframes.
   if (isIOS) {
@@ -1877,33 +1891,6 @@ function attachIframeDictionary(contents) {
     } catch { return null; }
   }
 
-  function triggerSelectionLookup() {
-    const sel = win.getSelection?.();
-    const raw = (sel?.toString() || '').trim();
-    if (!raw) return;
-    const word = raw.split(/\s+/)[0].replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
-    if (!word) return;
-    const now = Date.now();
-    if (word === lastSelectionWord && now - lastSelectionTs < 900) return;
-    lastSelectionWord = word;
-    lastSelectionTs = now;
-    // The native selection (and its Android drag handles) stays on screen after this fires,
-    // rendering above the dict popup we're about to open. Swap it for our own lingering
-    // highlight mark (same visual used for long-press lookups, cleared by closeDictPopup()
-    // via scheduleClearPressHighlight()) and drop the native selection so the handles go away.
-    try {
-      if (sel.rangeCount) {
-        const range = sel.getRangeAt(0);
-        clearTimeout(_clearHlTimer); _clearHlTimer = null;
-        const hl = doc.createElement('mark');
-        hl.className = 'br-press-hl';
-        range.surroundContents(hl);
-      }
-    } catch { /* range spans element boundaries - leave native selection in place below */ }
-    sel.removeAllRanges?.();
-    window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-  }
-
   doc.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
     pressX = t.clientX;
@@ -1911,20 +1898,38 @@ function attachIframeDictionary(contents) {
     pressTimer = setTimeout(() => {
       pressTimer = null;
       suppressNextTap = true;
+
+      // Long-press on an existing highlight/annotation → open its edit sheet instead of
+      // starting a new selection, on every platform.
+      const pointEl = doc.elementFromPoint(pressX, pressY);
+      const existingMark = pointEl?.closest?.('mark[data-annot-id]');
+      if (existingMark) {
+        const annotId = parseInt(existingMark.dataset.annotId);
+        if (!isNaN(annotId)) window.parent.postMessage({ type: 'annotation-click', id: annotId }, '*');
+        return;
+      }
+
+      if (!isIOS) {
+        // Android/other touch platforms keep native text selection enabled (see the
+        // contextmenu/dblclick handlers below and attachIframeAnnotation), so let the OS's
+        // own long-press-to-select run its course here instead of guessing a word/compound
+        // boundary ourselves — it's the same engine desktop double-click uses, gets CJK
+        // compound boundaries right (which our own Intl.Segmenter-based guess sometimes
+        // doesn't), and stays draggable to extend/shrink afterward. We never preventDefault()
+        // here, so there's nothing to hand back. attachIframeAnnotation's selectionchange/
+        // touchend listeners (same doc) pick up the settled — and any later re-adjusted —
+        // selection and open the bottom toolbar. Nothing here fires a dictionary lookup
+        // automatically; only that toolbar's explicit dict button (and desktop's
+        // dblclick/right-click below) do.
+        return;
+      }
+
+      // iOS disables native selection entirely (see the iosStyle block above), so there's no
+      // OS gesture to defer to — build the selection ourselves from the tapped word/compound
+      // boundary (same Intl.Segmenter-aware lookup getWordAtPoint above uses).
       const result = getWordRangeAtPoint(pressX, pressY);
       if (!result) return;
       const { word, range } = result;
-      // If the tapped word is inside an existing annotation mark, open its edit sheet
-      const _tappedNode = range.commonAncestorContainer;
-      const _existingMark = (_tappedNode.nodeType === 3 ? _tappedNode.parentElement : _tappedNode)
-        ?.closest?.('mark[data-annot-id]');
-      if (_existingMark) {
-        const _annotId = parseInt(_existingMark.dataset.annotId);
-        if (!isNaN(_annotId)) {
-          window.parent.postMessage({ type: 'annotation-click', id: _annotId }, '*');
-          return;
-        }
-      }
       win.getSelection?.()?.removeAllRanges?.();
       let cfiRange = '';
       if (prefs.bionicReading) {
@@ -1960,27 +1965,20 @@ function attachIframeDictionary(contents) {
 
   doc.addEventListener('touchcancel', () => { clearTimeout(pressTimer); pressTimer = null; }, { passive: true });
 
-  if (coarsePointer && !isIOS) {
-    // Fire dict lookup on pointer release, not during drag. selectionchange fires continuously
-    // while the user drags to select text (triggering lookup mid-drag); mouseup/touchend only
-    // fires when the user stops, which is the moment they expect the lookup.
-    const _onSelEnd = () => {
-      clearTimeout(selectionTimer);
-      selectionTimer = setTimeout(triggerSelectionLookup, 120);
-    };
-    doc.addEventListener('mouseup', _onSelEnd);
-    doc.addEventListener('touchend', _onSelEnd, { passive: true });
-  }
-
-  doc.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    const sel     = win.getSelection?.();
-    const selText = sel?.toString().trim();
-    const word    = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
-    if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-  });
-
   if (!coarsePointer) {
+    // contextmenu (right-click) is desktop-only: Android/mobile browsers also fire this
+    // event once a long-press finishes selecting text (their equivalent of a right-click),
+    // which — now that long-press is left to run native selection, see touchstart above —
+    // made every touch selection auto-trigger a dictionary lookup here. Left gated to a real
+    // right-click, matching the dblclick gate right below.
+    doc.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const sel     = win.getSelection?.();
+      const selText = sel?.toString().trim();
+      const word    = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
+      if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
+    });
+
     doc.addEventListener('dblclick', (e) => {
       // Skip if the mouse button is still held — user is double-click-dragging to extend a
       // selection, not looking up a word. Let mouseup → annotation toolbar handle that case.
@@ -2167,9 +2165,17 @@ function attachIframeAnnotation(contents) {
   function onSelectionEnd(e) {
     if (e?.button !== undefined && e.button !== 0) return; // ignore right/middle clicks
     const sel = doc.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      // Selection was cleared — e.g. the user tapped elsewhere in the book to dismiss it
+      // (a plain tap collapses any active selection on its own). Close the toolbar to match,
+      // instead of leaving it stranded open with nothing selected underneath it.
+      window.parent.postMessage({ type: 'annotation-deselect' }, '*');
+      return;
+    }
     const text = sel.toString().trim();
-    if (text.length < 2) return;
+    // A single character is a real, complete word for CJK scripts (e.g. "书" = book) — only
+    // reject a genuinely empty selection, not a short one.
+    if (!text) return;
     let cfiRange;
     if (prefs.bionicReading) {
       cfiRange = cfiFromBionicRange(sel.getRangeAt(0), doc, contents);
@@ -2184,6 +2190,12 @@ function attachIframeAnnotation(contents) {
   }
   doc.addEventListener('mouseup', onSelectionEnd);
   doc.addEventListener('touchend', () => setTimeout(() => onSelectionEnd(), 50));
+  // Keep the toolbar's underlying cfiRange/text in sync while the user keeps adjusting a
+  // selection via native drag handles after it first settles — handle drags are native OS
+  // UI, not synthetic DOM touch events, so touchend above never fires for them, but the
+  // Selection object (and this event) still updates. onSelectionEnd's own debounce coalesces
+  // the bursts of change events a drag produces into one update.
+  doc.addEventListener('selectionchange', () => onSelectionEnd());
 }
 
 // Generate a CFI compatible with the non-bionic DOM, even when bionic is currently active.
@@ -3458,6 +3470,7 @@ function closePanels() {
   closeFontPicker();
   const activeEl = document.activeElement;
   const searchHadFocus = !!activeEl && searchSidebar.contains(activeEl);
+  const searchWasOpen  = searchSidebar.classList.contains('open');
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   searchSidebar.classList.remove('open');
@@ -3466,6 +3479,21 @@ function closePanels() {
   panelBackdrop.classList.remove('visible');
   closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
+  if (searchWasOpen) {
+    clearInterval(_searchSafeAreaTimer);
+    _searchSafeAreaTimer = null;
+    // Restore the safe-area vars snapshotted in openSearch() — several passes at increasing
+    // delays, since keyboard-dismiss timing varies a lot across devices/browsers (same
+    // multi-probe strategy presetNamePrompt() uses for the same reason). Covers the settle
+    // window right after the live guard above stops.
+    const root = document.documentElement;
+    const restore = () => {
+      if (_searchSat) root.style.setProperty('--sat', _searchSat);
+      if (_searchSab) root.style.setProperty('--sab', _searchSab);
+      reapplyStyles();
+    };
+    [50, 300, 700, 1200].forEach(ms => setTimeout(restore, ms));
+  }
   if (prefs.autoHideHeader) forceHideAutoHeader();
 }
 
@@ -3538,12 +3566,34 @@ async function toggleFullscreen() {
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
+let _searchSat = '', _searchSab = ''; // snapshot before focusing searchInput opens the keyboard
+let _searchSafeAreaTimer = null;
+
+// Some Android browsers/WebViews rewrite --sat/--sab (or a resize handler reacting to the
+// on-screen keyboard does) as soon as the keyboard opens — not only after search closes, but
+// live, for as long as it's open, visibly collapsing both the search panel's own header and the
+// dimmed reader pane behind it under the camera cutout. Even dismissing just the keyboard (its
+// own hide button, search input still focused) doesn't fix it back up. Rather than chase exactly
+// which resize/probe is responsible, keep reasserting the known-good snapshot for as long as the
+// search panel stays open — cheap and self-correcting regardless of the cause.
+function _reassertSearchSafeArea() {
+  const root = document.documentElement;
+  if (_searchSat && root.style.getPropertyValue('--sat') !== _searchSat) root.style.setProperty('--sat', _searchSat);
+  if (_searchSab && root.style.getPropertyValue('--sab') !== _searchSab) root.style.setProperty('--sab', _searchSab);
+}
+
 function openSearch() {
   searchSidebar.classList.add('open');
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
   if (prefs.autoHideHeader) forceHideAutoHeader();
+  // Snapshot safe-area vars before focusing opens the on-screen keyboard.
+  const root = document.documentElement;
+  _searchSat = root.style.getPropertyValue('--sat');
+  _searchSab = root.style.getPropertyValue('--sab');
+  clearInterval(_searchSafeAreaTimer);
+  _searchSafeAreaTimer = setInterval(_reassertSearchSafeArea, 150);
   setTimeout(() => searchInput.focus(), 280);
 }
 
@@ -3788,7 +3838,7 @@ async function renderDictSettings() {
   const rawLang  = (_cxReader && _cxReader._book?.metadata?.language) || currentBook?.language;
   const bookLang = normalizeBookLang(rawLang);
   const defaultIds = bookLang
-    ? (dicts.filter(d => (prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang).map(d => d.id))
+    ? (dicts.filter(d => normalizeBookLang(prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang).map(d => d.id))
     : [];
   const defaultEnabledIds = defaultIds.length ? defaultIds : allIds;
   // enabled set: null = none; [] = default (book-language match, or all); [...] = explicit list
@@ -3904,7 +3954,7 @@ async function showDictPopup(word) {
     const allIds   = dicts.map(d => d.id);
     if (bookLang) {
       const matched = dicts
-        .filter(d => (prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang)
+        .filter(d => normalizeBookLang(prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang)
         .map(d => d.id);
       enabled = matched.length ? matched : allIds; // fallback to all if no tagged match
     } else {
@@ -3990,6 +4040,14 @@ window.addEventListener('message', (e) => {
   if (e.data?.type === 'annotation-click') {
     const a = annotationsCache.find(x => x.id === e.data.id);
     if (a) showAnnotationEditSheet(a);
+  }
+  if (e.data?.type === 'annotation-deselect') {
+    // Only act if the plain selection toolbar is actually showing — the note editor and
+    // dict popup flows close it (keepHighlight) while deliberately keeping _pendingAnnotation
+    // alive for when they're done, and this must not clobber that.
+    if (document.getElementById('annot-toolbar')?.classList.contains('open')) {
+      closeAnnotationToolbar();
+    }
   }
 });
 
@@ -6337,6 +6395,16 @@ function isAndroidApp() {
   return navigator.userAgent.includes('CodexaApp');
 }
 
+// True while a text-editable element holds focus — the on-screen keyboard can only be open
+// because of that, and it's the deterministic signal (see the resize listener below) for
+// "this resize/layout-var churn is keyboard noise, not a real size change".
+function isTextInputFocused() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+}
+
 // Running inside a Capacitor-wrapped WKWebView (iOS native app).
 // window.Capacitor is injected by the Capacitor bridge into every page the WKWebView loads.
 function isIOSApp() {
@@ -6404,6 +6472,15 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 window.addEventListener('resize', debounce(() => {
   applyHeaderButtonSize();
+  // Skip entirely while a text input is focused — the on-screen keyboard opening/closing fires
+  // 'resize' too (both in a plain browser and, per the branch below, inside the wrapped Android
+  // app), and reacting to it was rewriting --layout-h to whatever the keyboard-shrunk/restored
+  // window.innerHeight happened to be at that moment, then re-paginating CXReader against it —
+  // twice per keyboard cycle (once on open, once on close), each at a different height. The
+  // camera-cutout inset and true full-screen height don't actually change just because a
+  // keyboard opened, so there's nothing here that legitimately needs to react to it; skipping
+  // avoids both the visible resize/jerk and CXReader drifting to the wrong page in the process.
+  if (isTextInputFocused()) return;
   // When running inside the Android app, system bars are always hidden in reader.
   // Update layout vars here since this resize fires right after bars hide/show.
   if (isAndroidApp()) {
