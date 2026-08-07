@@ -9,6 +9,20 @@ const READER_BUILD = 'br-v89-cxreader-only';
 const _i18nReady = initI18n();
 log('[codexa] reader build', READER_BUILD);
 
+// initI18n() reveals the page (visibility:hidden → '', set by the inline script in <head>) as
+// soon as locale strings are ready — usually off a cached locale, faster than reader.html's
+// safe-area probe settling. That showed --sat as an unsettled/wrong value for a beat, then
+// visibly snapped once the probe finished — the "screen jump" right after opening a book.
+// Re-hide immediately if insets aren't settled yet, and reveal again once they are; if they
+// already were, this costs one harmless same-tick hide+reveal, imperceptible to the user.
+_i18nReady.then(() => {
+  if (!window.__insetsReadyPromise) return; // script blocked/absent — don't get stuck hidden
+  document.documentElement.style.visibility = 'hidden';
+  window.__insetsReadyPromise.then(() => {
+    document.documentElement.style.visibility = '';
+  });
+});
+
 // Module-level detection (mirrors init()'s _legacyWebView) so module-scope code can guard
 // features that break Chrome 83 Android WebView.
 const _isLegacyWv = /\bwv\b/.test(navigator.userAgent) &&
@@ -3436,6 +3450,7 @@ function closePanels() {
   closeFontPicker();
   const activeEl = document.activeElement;
   const searchHadFocus = !!activeEl && searchSidebar.contains(activeEl);
+  const searchWasOpen  = searchSidebar.classList.contains('open');
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   searchSidebar.classList.remove('open');
@@ -3444,10 +3459,13 @@ function closePanels() {
   panelBackdrop.classList.remove('visible');
   closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
-  if (searchHadFocus) {
+  if (searchWasOpen) {
+    clearInterval(_searchSafeAreaTimer);
+    _searchSafeAreaTimer = null;
     // Restore the safe-area vars snapshotted in openSearch() — several passes at increasing
     // delays, since keyboard-dismiss timing varies a lot across devices/browsers (same
-    // multi-probe strategy presetNamePrompt() uses for the same reason).
+    // multi-probe strategy presetNamePrompt() uses for the same reason). Covers the settle
+    // window right after the live guard above stops.
     const root = document.documentElement;
     const restore = () => {
       if (_searchSat) root.style.setProperty('--sat', _searchSat);
@@ -3529,6 +3547,20 @@ async function toggleFullscreen() {
 
 // ── Search ────────────────────────────────────────────────────────────────────
 let _searchSat = '', _searchSab = ''; // snapshot before focusing searchInput opens the keyboard
+let _searchSafeAreaTimer = null;
+
+// Some Android browsers/WebViews rewrite --sat/--sab (or a resize handler reacting to the
+// on-screen keyboard does) as soon as the keyboard opens — not only after search closes, but
+// live, for as long as it's open, visibly collapsing both the search panel's own header and the
+// dimmed reader pane behind it under the camera cutout. Even dismissing just the keyboard (its
+// own hide button, search input still focused) doesn't fix it back up. Rather than chase exactly
+// which resize/probe is responsible, keep reasserting the known-good snapshot for as long as the
+// search panel stays open — cheap and self-correcting regardless of the cause.
+function _reassertSearchSafeArea() {
+  const root = document.documentElement;
+  if (_searchSat && root.style.getPropertyValue('--sat') !== _searchSat) root.style.setProperty('--sat', _searchSat);
+  if (_searchSab && root.style.getPropertyValue('--sab') !== _searchSab) root.style.setProperty('--sab', _searchSab);
+}
 
 function openSearch() {
   searchSidebar.classList.add('open');
@@ -3536,13 +3568,12 @@ function openSearch() {
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  // Snapshot safe-area vars before focusing opens the on-screen keyboard — the keyboard
-  // show/hide cycle can leave --sat/--sab stale afterward (same class of issue
-  // presetNamePrompt() below already works around for its own input), collapsing the header
-  // under a camera-cutout notch. Restored in closePanels() once search closes.
+  // Snapshot safe-area vars before focusing opens the on-screen keyboard.
   const root = document.documentElement;
   _searchSat = root.style.getPropertyValue('--sat');
   _searchSab = root.style.getPropertyValue('--sab');
+  clearInterval(_searchSafeAreaTimer);
+  _searchSafeAreaTimer = setInterval(_reassertSearchSafeArea, 150);
   setTimeout(() => searchInput.focus(), 280);
 }
 
@@ -6336,6 +6367,16 @@ function isAndroidApp() {
   return navigator.userAgent.includes('CodexaApp');
 }
 
+// True while a text-editable element holds focus — the on-screen keyboard can only be open
+// because of that, and it's the deterministic signal (see the resize listener below) for
+// "this resize/layout-var churn is keyboard noise, not a real size change".
+function isTextInputFocused() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+}
+
 // Running inside a Capacitor-wrapped WKWebView (iOS native app).
 // window.Capacitor is injected by the Capacitor bridge into every page the WKWebView loads.
 function isIOSApp() {
@@ -6403,6 +6444,15 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 window.addEventListener('resize', debounce(() => {
   applyHeaderButtonSize();
+  // Skip entirely while a text input is focused — the on-screen keyboard opening/closing fires
+  // 'resize' too (both in a plain browser and, per the branch below, inside the wrapped Android
+  // app), and reacting to it was rewriting --layout-h to whatever the keyboard-shrunk/restored
+  // window.innerHeight happened to be at that moment, then re-paginating CXReader against it —
+  // twice per keyboard cycle (once on open, once on close), each at a different height. The
+  // camera-cutout inset and true full-screen height don't actually change just because a
+  // keyboard opened, so there's nothing here that legitimately needs to react to it; skipping
+  // avoids both the visible resize/jerk and CXReader drifting to the wrong page in the process.
+  if (isTextInputFocused()) return;
   // When running inside the Android app, system bars are always hidden in reader.
   // Update layout vars here since this resize fires right after bars hide/show.
   if (isAndroidApp()) {
