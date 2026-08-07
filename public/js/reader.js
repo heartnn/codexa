@@ -1898,37 +1898,38 @@ function attachIframeDictionary(contents) {
     pressTimer = setTimeout(() => {
       pressTimer = null;
       suppressNextTap = true;
+
+      // Long-press on an existing highlight/annotation → open its edit sheet instead of
+      // starting a new selection, on every platform.
+      const pointEl = doc.elementFromPoint(pressX, pressY);
+      const existingMark = pointEl?.closest?.('mark[data-annot-id]');
+      if (existingMark) {
+        const annotId = parseInt(existingMark.dataset.annotId);
+        if (!isNaN(annotId)) window.parent.postMessage({ type: 'annotation-click', id: annotId }, '*');
+        return;
+      }
+
+      if (!isIOS) {
+        // Android/other touch platforms keep native text selection enabled (see the
+        // contextmenu/dblclick handlers below and attachIframeAnnotation), so let the OS's
+        // own long-press-to-select run its course here instead of guessing a word/compound
+        // boundary ourselves — it's the same engine desktop double-click uses, gets CJK
+        // compound boundaries right (which our own Intl.Segmenter-based guess sometimes
+        // doesn't), and stays draggable to extend/shrink afterward. We never preventDefault()
+        // here, so there's nothing to hand back. attachIframeAnnotation's selectionchange/
+        // touchend listeners (same doc) pick up the settled — and any later re-adjusted —
+        // selection and open the bottom toolbar. Nothing here fires a dictionary lookup
+        // automatically; only that toolbar's explicit dict button (and desktop's
+        // dblclick/right-click below) do.
+        return;
+      }
+
+      // iOS disables native selection entirely (see the iosStyle block above), so there's no
+      // OS gesture to defer to — build the selection ourselves from the tapped word/compound
+      // boundary (same Intl.Segmenter-aware lookup getWordAtPoint above uses).
       const result = getWordRangeAtPoint(pressX, pressY);
       if (!result) return;
       const { word, range } = result;
-      // If the tapped word is inside an existing annotation mark, open its edit sheet
-      const _tappedNode = range.commonAncestorContainer;
-      const _existingMark = (_tappedNode.nodeType === 3 ? _tappedNode.parentElement : _tappedNode)
-        ?.closest?.('mark[data-annot-id]');
-      if (_existingMark) {
-        const _annotId = parseInt(_existingMark.dataset.annotId);
-        if (!isNaN(_annotId)) {
-          window.parent.postMessage({ type: 'annotation-click', id: _annotId }, '*');
-          return;
-        }
-      }
-      // CJK scripts (Chinese/Japanese) have no spaces between words, so — unlike Latin text,
-      // where the regex/segment boundary below is essentially always the word the user meant —
-      // a single long-press can't reliably guess whether they want this character alone or as
-      // part of an adjacent compound. We never call preventDefault() on these touch listeners,
-      // so on Android, the OS's own native long-press-to-select (word-breaking + draggable
-      // handles) is ALSO running in parallel with this timer; immediately clearing the selection
-      // and opening our own UI (as the Latin-script path below does) fights that native gesture
-      // and wins the race almost every time, which is exactly why the selection couldn't be
-      // dragged to extend/shrink and handles only ever showed up when landing on punctuation
-      // (where getWordRangeAtPoint returns null and this code never runs). Back off for CJK and
-      // let native selection do the picking instead — attachIframeAnnotation's onSelectionEnd
-      // (same mouseup/touchend events) already handles "user finished a manual selection" by
-      // showing the bottom toolbar, whose dictionary button covers the lookup case explicitly
-      // instead of guessing. iOS is excluded:
-      // it disables native selection entirely (see the iosStyle block above), so backing off
-      // there would leave nothing to take over and the long-press would do nothing at all.
-      if (!isIOS && CJK_NO_SPACE_RE.test(word[0])) return;
       win.getSelection?.()?.removeAllRanges?.();
       let cfiRange = '';
       if (prefs.bionicReading) {
@@ -1964,15 +1965,20 @@ function attachIframeDictionary(contents) {
 
   doc.addEventListener('touchcancel', () => { clearTimeout(pressTimer); pressTimer = null; }, { passive: true });
 
-  doc.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    const sel     = win.getSelection?.();
-    const selText = sel?.toString().trim();
-    const word    = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
-    if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-  });
-
   if (!coarsePointer) {
+    // contextmenu (right-click) is desktop-only: Android/mobile browsers also fire this
+    // event once a long-press finishes selecting text (their equivalent of a right-click),
+    // which — now that long-press is left to run native selection, see touchstart above —
+    // made every touch selection auto-trigger a dictionary lookup here. Left gated to a real
+    // right-click, matching the dblclick gate right below.
+    doc.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const sel     = win.getSelection?.();
+      const selText = sel?.toString().trim();
+      const word    = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
+      if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
+    });
+
     doc.addEventListener('dblclick', (e) => {
       // Skip if the mouse button is still held — user is double-click-dragging to extend a
       // selection, not looking up a word. Let mouseup → annotation toolbar handle that case.
@@ -2159,9 +2165,17 @@ function attachIframeAnnotation(contents) {
   function onSelectionEnd(e) {
     if (e?.button !== undefined && e.button !== 0) return; // ignore right/middle clicks
     const sel = doc.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      // Selection was cleared — e.g. the user tapped elsewhere in the book to dismiss it
+      // (a plain tap collapses any active selection on its own). Close the toolbar to match,
+      // instead of leaving it stranded open with nothing selected underneath it.
+      window.parent.postMessage({ type: 'annotation-deselect' }, '*');
+      return;
+    }
     const text = sel.toString().trim();
-    if (text.length < 2) return;
+    // A single character is a real, complete word for CJK scripts (e.g. "书" = book) — only
+    // reject a genuinely empty selection, not a short one.
+    if (!text) return;
     let cfiRange;
     if (prefs.bionicReading) {
       cfiRange = cfiFromBionicRange(sel.getRangeAt(0), doc, contents);
@@ -2176,6 +2190,12 @@ function attachIframeAnnotation(contents) {
   }
   doc.addEventListener('mouseup', onSelectionEnd);
   doc.addEventListener('touchend', () => setTimeout(() => onSelectionEnd(), 50));
+  // Keep the toolbar's underlying cfiRange/text in sync while the user keeps adjusting a
+  // selection via native drag handles after it first settles — handle drags are native OS
+  // UI, not synthetic DOM touch events, so touchend above never fires for them, but the
+  // Selection object (and this event) still updates. onSelectionEnd's own debounce coalesces
+  // the bursts of change events a drag produces into one update.
+  doc.addEventListener('selectionchange', () => onSelectionEnd());
 }
 
 // Generate a CFI compatible with the non-bionic DOM, even when bionic is currently active.
@@ -4020,6 +4040,14 @@ window.addEventListener('message', (e) => {
   if (e.data?.type === 'annotation-click') {
     const a = annotationsCache.find(x => x.id === e.data.id);
     if (a) showAnnotationEditSheet(a);
+  }
+  if (e.data?.type === 'annotation-deselect') {
+    // Only act if the plain selection toolbar is actually showing — the note editor and
+    // dict popup flows close it (keepHighlight) while deliberately keeping _pendingAnnotation
+    // alive for when they're done, and this must not clobber that.
+    if (document.getElementById('annot-toolbar')?.classList.contains('open')) {
+      closeAnnotationToolbar();
+    }
   }
 });
 
