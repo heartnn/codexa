@@ -109,8 +109,31 @@
         }, 500);
       });
 
-      // Re-probe on orientation change / resize
+      // Re-probe on orientation change / resize — but skip resizes caused by the on-screen
+      // keyboard opening/closing (e.g. focusing the in-book search box). iOS fires an ordinary
+      // 'resize' for those too, and re-probing env(safe-area-inset-*) while the keyboard is
+      // up/settling is exactly the unreliable window documented above and in presetNamePrompt()
+      // (reader.js) — a stale 0 here overwrites the correct --sat/--layout-h, and unlike that
+      // function's own snapshot/restore, nothing here ever corrects it back afterward, so the
+      // status bar stays collapsed under the notch even after the keyboard closes.
+      //
+      // Telling a keyboard-driven resize apart from a real rotation/chrome-change by comparing
+      // visualViewport.height against window.innerHeight is NOT reliable here: on iOS 26 PWA,
+      // window.innerHeight itself is already known to misbehave (see the note above this script)
+      // and can shrink right along with visualViewport when the keyboard opens, defeating a
+      // ratio check. Whether a text input currently holds focus is deterministic instead of
+      // inferred — the keyboard can only be open because of that, and it's reliably cleared by
+      // the time a close-triggered resize fires (blur() runs synchronously before the keyboard's
+      // dismiss animation/resize).
+      function isTextInputFocused() {
+        var el = document.activeElement;
+        if (!el) return false;
+        var tag = el.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
+      }
       window.addEventListener('resize', function () {
+        if (isTextInputFocused()) return;
+        if (window.visualViewport && window.visualViewport.height < window.innerHeight * 0.75) return;
         setTimeout(function () { applyInsets(true); }, 200);
       });
 

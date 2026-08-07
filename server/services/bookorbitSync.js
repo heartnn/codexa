@@ -158,11 +158,18 @@ async function login(userId, ctx) {
 async function refresh(userId, ctx) {
   const tok = tokens.get(userId);
   if (!tok?.refresh) return login(userId, ctx);
-  const res = await fetch(`${ctx.webBase}/auth/refresh`, {
-    method: 'POST',
-    headers: { cookie: `refresh_token=${encodeURIComponent(tok.refresh)}`, accept: 'application/json' },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let res;
+  try {
+    res = await fetch(`${ctx.webBase}/auth/refresh`, {
+      method: 'POST',
+      headers: { cookie: `refresh_token=${encodeURIComponent(tok.refresh)}`, accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    // Network failure (e.g. BookOrbit unreachable) — fall back to a fresh login attempt, which
+    // will itself fail cleanly (and record the real error) instead of throwing a raw fetch error.
+    return login(userId, ctx);
+  }
   if (!res.ok) return login(userId, ctx);
   const setCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
   const access = extractToken(setCookies, 'access_token') || tok.access;
@@ -172,7 +179,13 @@ async function refresh(userId, ctx) {
 
 // Authenticated request: paces calls, refreshes once on 401, backs off on 429.
 async function api(userId, ctx, method, path, body, state = { refreshed: false, throttled: 0 }) {
-  if (!tokens.has(userId)) await login(userId, ctx);
+  // login()/refresh() already record their own failure status; just make sure a rejection here
+  // can never escape as an unhandled promise rejection (login() throws on any network failure,
+  // e.g. DNS resolution — this used to crash the whole process on the very first BookOrbit call).
+  if (!tokens.has(userId)) {
+    try { await login(userId, ctx); }
+    catch (err) { return { ok: false, status: 0, error: err.message }; }
+  }
   const tok = tokens.get(userId);
   await sleep(PACE_MS);
   let res;
@@ -192,7 +205,8 @@ async function api(userId, ctx, method, path, body, state = { refreshed: false, 
     return { ok: false, status: 0, error: err.message };
   }
   if (res.status === 401 && !state.refreshed) {
-    await refresh(userId, ctx);
+    try { await refresh(userId, ctx); }
+    catch (err) { recordStatus(userId, false, err.message); return { ok: false, status: 0, error: err.message }; }
     return api(userId, ctx, method, path, body, { ...state, refreshed: true });
   }
   if (res.status === 429 && state.throttled < MAX_429_RETRIES) {
@@ -601,7 +615,12 @@ async function getRelatedByBoId(userId, ctx, boBookId) {
 // Fetch a BookOrbit-hosted image (thumbnail) through our own server so the browser never
 // needs BookOrbit's JWT directly. Shares the same token jar as api().
 async function fetchAsset(userId, ctx, path) {
-  if (!tokens.has(userId)) await login(userId, ctx);
+  // Same "never let login()/refresh() throw past us" guard as api() — every current caller
+  // happens to wrap this in its own try/catch, but that shouldn't be the only thing standing
+  // between a BookOrbit network failure and a process-crashing unhandled rejection.
+  if (!tokens.has(userId)) {
+    try { await login(userId, ctx); } catch { return { ok: false }; }
+  }
   const doFetch = () => {
     const tok = tokens.get(userId);
     return fetch(`${ctx.webBase}${path}`, {
@@ -612,7 +631,7 @@ async function fetchAsset(userId, ctx, path) {
   let res;
   try { res = await doFetch(); } catch { return { ok: false }; }
   if (res.status === 401) {
-    await refresh(userId, ctx);
+    try { await refresh(userId, ctx); } catch { return { ok: false }; }
     try { res = await doFetch(); } catch { return { ok: false }; }
   }
   if (!res.ok) return { ok: false, status: res.status };

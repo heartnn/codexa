@@ -1817,7 +1817,7 @@ function attachIframeDictionary(contents) {
   const doc = contents.document;
   const win = contents.window;
   const coarsePointer = !!win.matchMedia?.('(pointer: coarse)')?.matches;
-  let pressTimer = null, pressX = 0, pressY = 0, selectionTimer = null, lastSelectionWord = '', lastSelectionTs = 0;
+  let pressTimer = null, pressX = 0, pressY = 0;
 
   // iOS: suppress native callout and text-selection takeover inside epub iframes.
   if (isIOS) {
@@ -1877,33 +1877,6 @@ function attachIframeDictionary(contents) {
     } catch { return null; }
   }
 
-  function triggerSelectionLookup() {
-    const sel = win.getSelection?.();
-    const raw = (sel?.toString() || '').trim();
-    if (!raw) return;
-    const word = raw.split(/\s+/)[0].replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
-    if (!word) return;
-    const now = Date.now();
-    if (word === lastSelectionWord && now - lastSelectionTs < 900) return;
-    lastSelectionWord = word;
-    lastSelectionTs = now;
-    // The native selection (and its Android drag handles) stays on screen after this fires,
-    // rendering above the dict popup we're about to open. Swap it for our own lingering
-    // highlight mark (same visual used for long-press lookups, cleared by closeDictPopup()
-    // via scheduleClearPressHighlight()) and drop the native selection so the handles go away.
-    try {
-      if (sel.rangeCount) {
-        const range = sel.getRangeAt(0);
-        clearTimeout(_clearHlTimer); _clearHlTimer = null;
-        const hl = doc.createElement('mark');
-        hl.className = 'br-press-hl';
-        range.surroundContents(hl);
-      }
-    } catch { /* range spans element boundaries - leave native selection in place below */ }
-    sel.removeAllRanges?.();
-    window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-  }
-
   doc.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
     pressX = t.clientX;
@@ -1935,9 +1908,10 @@ function attachIframeDictionary(contents) {
       // and wins the race almost every time, which is exactly why the selection couldn't be
       // dragged to extend/shrink and handles only ever showed up when landing on punctuation
       // (where getWordRangeAtPoint returns null and this code never runs). Back off for CJK and
-      // let native selection do the picking instead — the touchend listeners further down
-      // (triggerSelectionLookup / onSelectionEnd in attachIframeAnnotation) already handle "user
-      // finished a manual selection" and react to whatever the user ends up with. iOS is excluded:
+      // let native selection do the picking instead — attachIframeAnnotation's onSelectionEnd
+      // (same mouseup/touchend events) already handles "user finished a manual selection" by
+      // showing the bottom toolbar, whose dictionary button covers the lookup case explicitly
+      // instead of guessing. iOS is excluded:
       // it disables native selection entirely (see the iosStyle block above), so backing off
       // there would leave nothing to take over and the long-press would do nothing at all.
       if (!isIOS && CJK_NO_SPACE_RE.test(word[0])) return;
@@ -1975,18 +1949,6 @@ function attachIframeDictionary(contents) {
   }, { passive: true });
 
   doc.addEventListener('touchcancel', () => { clearTimeout(pressTimer); pressTimer = null; }, { passive: true });
-
-  if (coarsePointer && !isIOS) {
-    // Fire dict lookup on pointer release, not during drag. selectionchange fires continuously
-    // while the user drags to select text (triggering lookup mid-drag); mouseup/touchend only
-    // fires when the user stops, which is the moment they expect the lookup.
-    const _onSelEnd = () => {
-      clearTimeout(selectionTimer);
-      selectionTimer = setTimeout(triggerSelectionLookup, 120);
-    };
-    doc.addEventListener('mouseup', _onSelEnd);
-    doc.addEventListener('touchend', _onSelEnd, { passive: true });
-  }
 
   doc.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -3482,6 +3444,18 @@ function closePanels() {
   panelBackdrop.classList.remove('visible');
   closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
+  if (searchHadFocus) {
+    // Restore the safe-area vars snapshotted in openSearch() — several passes at increasing
+    // delays, since keyboard-dismiss timing varies a lot across devices/browsers (same
+    // multi-probe strategy presetNamePrompt() uses for the same reason).
+    const root = document.documentElement;
+    const restore = () => {
+      if (_searchSat) root.style.setProperty('--sat', _searchSat);
+      if (_searchSab) root.style.setProperty('--sab', _searchSab);
+      reapplyStyles();
+    };
+    [50, 300, 700, 1200].forEach(ms => setTimeout(restore, ms));
+  }
   if (prefs.autoHideHeader) forceHideAutoHeader();
 }
 
@@ -3554,12 +3528,21 @@ async function toggleFullscreen() {
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
+let _searchSat = '', _searchSab = ''; // snapshot before focusing searchInput opens the keyboard
+
 function openSearch() {
   searchSidebar.classList.add('open');
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
   if (prefs.autoHideHeader) forceHideAutoHeader();
+  // Snapshot safe-area vars before focusing opens the on-screen keyboard — the keyboard
+  // show/hide cycle can leave --sat/--sab stale afterward (same class of issue
+  // presetNamePrompt() below already works around for its own input), collapsing the header
+  // under a camera-cutout notch. Restored in closePanels() once search closes.
+  const root = document.documentElement;
+  _searchSat = root.style.getPropertyValue('--sat');
+  _searchSab = root.style.getPropertyValue('--sab');
   setTimeout(() => searchInput.focus(), 280);
 }
 
